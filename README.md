@@ -1,30 +1,30 @@
-# nfv_sim — Simulator auto-scaling VNF chuẩn Gymnasium (dữ liệu SNDZoo)
+# nfv_sim — Gymnasium-compatible VNF auto-scaling simulator (SNDZoo data)
 
-Simulator nhẹ, viết bằng Python thuần (numpy + pandas + gymnasium) để huấn luyện và đánh giá agent RL
-cho bài toán **tự động scale VNF**. Simulator chạy trên trace thật của SNDZoo: Nginx (WEB),
-Mosquitto (IOT), Snort (SEC). Nó thay cho CloudSimNFV và chạy khoảng 5.000 bước/giây trên một core CPU.
+A lightweight simulator written in plain Python (numpy + pandas + gymnasium) for training and evaluating RL
+agents on the **VNF auto-scaling** problem. It runs on real SNDZoo traces: Nginx (WEB),
+Mosquitto (IOT) and Snort (SEC). It replaces CloudSimNFV and runs at roughly 5,000 steps/second on a single CPU core.
 
-## 1. Cài đặt và chạy trên Windows
+## 1. Installation and usage on Windows
 
-Yêu cầu Python ≥ 3.10 (đã thử với 3.13). Mọi lệnh chạy trong thư mục dự án `D:\Git_repo\VNF Gym`.
+Requires Python ≥ 3.10 (tested with 3.13). Run all commands from the project folder `D:\Git_repo\VNF Gym`.
 
-**PowerShell / terminal trong VS Code**
+**PowerShell / VS Code terminal**
 
 ```powershell
 cd "D:\Git_repo\VNF Gym"
 python -m venv .venv
-.\.venv\Scripts\Activate.ps1          # nếu bị chặn: Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+.\.venv\Scripts\Activate.ps1          # if blocked: Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 pip install -r requirements.txt
-pip install stable-baselines3         # chỉ cần khi train PPO/DQN (kéo theo PyTorch)
+pip install stable-baselines3         # only needed to train PPO/DQN (pulls in PyTorch)
 ```
 
-* **cmd**: các lệnh giống trên, nhưng kích hoạt venv bằng `.venv\Scripts\activate.bat`.
-* **Git Bash**: kích hoạt venv bằng `source .venv/Scripts/activate`.
+* **cmd**: same commands as above, but activate the venv with `.venv\Scripts\activate.bat`.
+* **Git Bash**: activate the venv with `source .venv/Scripts/activate`.
 
-> Trên Windows, đừng chạy `python -m pip install --upgrade pip` bên trong venv nếu không cần. pip có thể tự
-> khoá file của chính nó và làm hỏng venv; khi đó xoá thư mục `.venv` rồi tạo lại.
+> On Windows, avoid running `python -m pip install --upgrade pip` inside the venv unless necessary. pip can lock
+> its own files and corrupt the venv; if that happens, delete the `.venv` folder and recreate it.
 
-**Chạy** (tham số `--data` trỏ tới thư mục **DatasetSNDZoo**):
+**Run** (the `--data` argument points to the **DatasetSNDZoo** folder):
 
 ```powershell
 python examples\check_env.py     --data "E:/SNDZoo dataset/SNDZoo dataset/DatasetSNDZoo"
@@ -32,199 +32,199 @@ python examples\run_baselines.py --data "E:/SNDZoo dataset/SNDZoo dataset/Datase
 python examples\train_ppo.py     --data "E:/SNDZoo dataset/SNDZoo dataset/DatasetSNDZoo" --steps 300000
 ```
 
-Kết quả (`baselines.csv`, hình `capacity_*.png`, model PPO) được ghi vào thư mục `results/`.
+Outputs (`baselines.csv`, `capacity_*.png` plots, the PPO model) are written to the `results/` folder.
 
 **VS Code**:
 
-1. Mở thư mục dự án.
-2. `Ctrl+Shift+P` → *Python: Select Interpreter* → chọn `.venv`.
-3. Mở terminal mới; venv được kích hoạt tự động. Chạy các lệnh như trên.
+1. Open the project folder.
+2. `Ctrl+Shift+P` → *Python: Select Interpreter* → choose `.venv`.
+3. Open a new terminal; the venv is activated automatically. Run the commands above.
 
-## 2. Dữ liệu được dùng thế nào
+## 2. How the data is used
 
-| Tập | Thư mục | Độ dài |
+| Split | Folder | Length |
 |---|---|---|
-| train | `<VNF>/TrainTest/NoHoles/*.csv` | ~20.000 phút (27/01 → 10/02/2025) |
-| test  | `<VNF>/18-02/CSVmergedFIXED/*.csv` | ~1.300 phút (17/02 10:00 → 18/02 07:47) |
+| train | `<VNF>/TrainTest/NoHoles/*.csv` | ~20,000 minutes (27/01 → 10/02/2025) |
+| test  | `<VNF>/18-02/CSVmergedFIXED/*.csv` | ~1,300 minutes (17/02 10:00 → 18/02 07:47) |
 
-* **Tải đến** (`load_metric="rx"`, mặc định) là `container_network_receive_bytes_total`, đã chuẩn hoá về [0,1].
-  Có thể đổi sang `"cpu"`.
-* **Quy đổi ra số instance:** `demand_t = load_t × peak_instances[VNF]`. Mặc định WEB=6, IOT=4, SEC=5,
-  nghĩa là lúc tải đỉnh của trace cần ~6 instance WEB chạy 100%. Dữ liệu đã bị chuẩn hoá min-max nên mất
-  thang đo tuyệt đối, vì vậy đây là **giả định cần ghi rõ trong luận văn**.
-* **Memory working set** (`mem`) được dùng để tính **thời gian và chi phí migration**.
-  VNF đang dùng nhiều RAM thì migrate lâu hơn và tốn hơn (mô phỏng pre-copy live migration).
-* Các cột tx/cpu được nạp sẵn để bạn dùng làm feature hoặc đổi `load_metric`.
+* **Incoming load** (`load_metric="rx"`, the default) is `container_network_receive_bytes_total`, normalised to [0,1].
+  It can be switched to `"cpu"`.
+* **Conversion to instance count:** `demand_t = load_t × peak_instances[VNF]`. Defaults are WEB=6, IOT=4, SEC=5,
+  meaning that at the trace's peak load about 6 WEB instances are needed running at 100%. The data was min-max
+  normalised, so the absolute scale is lost; this is therefore an **assumption that must be stated explicitly in the thesis**.
+* **Memory working set** (`mem`) is used to compute **migration time and cost**.
+  A VNF using more RAM takes longer and costs more to migrate (modelling pre-copy live migration).
+* The tx/cpu columns are loaded as well, so you can use them as features or change `load_metric`.
 
-## 3. Mô hình hệ thống
+## 3. System model
 
 ```
           ┌─ node 0 [■■■□] ─┐      1 node = node_slots (4) vCPU; 1 instance = size vCPU (1..max_vcpu)
- tải ───► │  node 1 [■■□□]  │ ───► node bật nếu có ≥1 instance; công suất P = P_idle + (P_max−P_idle)·util
+ load ──► │  node 1 [■■□□]  │ ───► a node is on if it hosts ≥1 instance; power P = P_idle + (P_max−P_idle)·util
           └─ node 5 [□□□□] ─┘
 ```
 
-**Vòng đời instance**
+**Instance lifecycle**
 
-| Trạng thái | Phục vụ | Tốn chi phí | Ghi chú |
+| State | Serves | Incurs cost | Notes |
 |---|---|---|---|
-| BOOT | 0% | có | kéo dài `scale_out_delay` bước (mặc định 3 phút) → **độ trễ khi scale-out** |
-| RUN  | size^α (α = `vertical_alpha` = 0,9) | có | |
-| MIG  | `migration_capacity` (50%) | có, chiếm slot ở cả node nguồn và node đích | kéo dài `migration_base_delay + ceil(mem × migration_mem_delay)` bước |
+| BOOT | 0% | yes | lasts `scale_out_delay` steps (default 3 minutes) → **scale-out latency** |
+| RUN  | size^α (α = `vertical_alpha` = 0.9) | yes | |
+| MIG  | `migration_capacity` (50%) | yes, occupies a slot on both the source and destination node | lasts `migration_base_delay + ceil(mem × migration_mem_delay)` steps |
 
 **Vertical scaling**
 
-* +1 vCPU: áp dụng cho một instance đang chạy, chỉ khi node của nó còn slot. Có hiệu lực sau `vertical_delay`
-  bước (mặc định 1, nhanh hơn boot), nhưng bị giới hạn bởi chỗ trống trên node và hiệu suất giảm dần (size^α).
-* −1 vCPU: có hiệu lực ngay.
+* +1 vCPU: applies to a running instance, only if its node still has a free slot. Takes effect after `vertical_delay`
+  steps (default 1, faster than boot), but is limited by free space on the node and diminishing returns (size^α).
+* −1 vCPU: takes effect immediately.
 
-Đây là trade-off cần phân tích: vertical nhanh nhưng bị giới hạn, horizontal chậm (do boot) nhưng mở rộng được.
+This is a trade-off worth analysing: vertical scaling is fast but bounded, horizontal scaling is slow (due to boot) but scalable.
 
-**Hiệu năng:** mỗi VNF có một hàng đợi. Phần tải vượt công suất được dồn sang bước sau (backlog, tối đa
-`buffer_steps` × công suất); phần còn thừa nữa bị drop.
+**Performance:** each VNF has one queue. Load exceeding capacity is carried over to the next step (backlog, up to
+`buffer_steps` × capacity); anything beyond that is dropped.
 
 ```
-latency = base_latency / (1 − min(ρ, 0.98)) + backlog/capacity × độ dài bước
-vi phạm SLA  ⇔  latency > sla_ms  hoặc  có drop
+latency = base_latency / (1 − min(ρ, 0.98)) + backlog/capacity × step_length
+SLA violation  ⇔  latency > sla_ms  or  there is a drop
 ```
 
-Giá trị mặc định: base latency WEB/IOT/SEC = 20/5/10 ms, SLA = 100/30/60 ms. **Đây là tham số giả định,
-không đo từ dữ liệu**, và bạn chỉnh được trong `SimConfig`.
+Default values: base latency WEB/IOT/SEC = 20/5/10 ms, SLA = 100/30/60 ms. **These are assumed parameters,
+not measured from the data**, and can be changed in `SimConfig`.
 
-**Hai chỉ tiêu chính của đề tài**
+**The two main metrics of the thesis**
 
-* **Utilization** = tải được phục vụ / công suất đã cấp. Công suất đã cấp tính cả instance đang boot và vCPU
-  đang chờ, vì đều bị tính tiền.
-  * Cả episode: `episode_summary()["utilization"]`.
-  * Từng bước: `info["utilization"]`.
-* **Oscillation**: một lần đảo chiều xảy ra khi VNF thay đổi tài nguyên ngược hướng với lần thay đổi gần nhất
-  và cách nó ≤ `osc_window` bước (mặc định 10). Ví dụ: scale-out rồi scale-in sau 4 phút.
-  * `oscillations`: tổng số lần đảo chiều.
-  * `oscillation_rate` = số lần / (số bước × số VNF).
-  * `scaling_actions`: tổng số thao tác scale.
+* **Utilization** = served load / provisioned capacity. Provisioned capacity includes booting instances and
+  pending vCPUs, since both are billed.
+  * Whole episode: `episode_summary()["utilization"]`.
+  * Per step: `info["utilization"]`.
+* **Oscillation**: a reversal occurs when a VNF changes its resources in the opposite direction to its most recent
+  change and within `osc_window` steps of it (default 10). Example: scale-out followed by scale-in 4 minutes later.
+  * `oscillations`: total number of reversals.
+  * `oscillation_rate` = reversals / (steps × number of VNFs).
+  * `scaling_actions`: total number of scaling operations.
 
 ## 4. State – Action – Reward
 
-**Action**, mặc định là `MultiDiscrete([6, 6, 6])`, mỗi VNF có một lựa chọn:
+**Action**, by default `MultiDiscrete([6, 6, 6])`, one choice per VNF:
 
-| idx | ý nghĩa |
+| idx | meaning |
 |---|---|
-| 0 | horizontal scale-in −1 (ưu tiên huỷ instance đang boot, sau đó gỡ instance trên node vắng nhất) |
-| 1 | giữ nguyên |
-| 2 | horizontal scale-out +1 (đặt theo best-fit; bật node mới nếu hết chỗ) |
-| 3 | migrate 1 instance để gom node (từ node vắng nhất sang node đầy nhất còn chỗ) |
+| 0 | horizontal scale-in −1 (prefers cancelling a booting instance, then removes an instance from the emptiest node) |
+| 1 | no-op |
+| 2 | horizontal scale-out +1 (best-fit placement; powers on a new node if there is no room) |
+| 3 | migrate 1 instance to consolidate nodes (from the emptiest node to the fullest node that has room) |
 | 4 | vertical scale-up +1 vCPU |
 | 5 | vertical scale-down −1 vCPU |
 
-* `max_step_change=K` cho phép thay đổi ±K instance mỗi bước. Khi đó:
-  * idx 0..2K là horizontal;
-  * idx 2K+1 là migrate;
-  * idx 2K+2 và 2K+3 là vertical.
-* `enable_vertical=False` bỏ hai action vertical (quay về 4 action).
-* `discrete_action=True` làm phẳng action thành `Discrete(6^3 = 216)`, dùng cho DQN.
-* Action không hợp lệ (vượt min/max, hết slot, không có gì để gom) bị bỏ qua và bị phạt `w_invalid`.
+* `max_step_change=K` allows changing by ±K instances per step. In that case:
+  * idx 0..2K are horizontal;
+  * idx 2K+1 is migrate;
+  * idx 2K+2 and 2K+3 are vertical.
+* `enable_vertical=False` removes the two vertical actions (back to 4 actions).
+* `discrete_action=True` flattens the action into `Discrete(6^3 = 216)`, for use with DQN.
+* Invalid actions (exceeding min/max, no free slot, nothing to consolidate) are ignored and penalised by `w_invalid`.
 
-**Observation**, gồm 55 chiều với cấu hình mặc định:
+**Observation**, 55 dimensions with the default configuration:
 
-* Cho mỗi VNF (17 chiều):
-  * 6 giá trị tải gần nhất;
-  * [dự báo H bước, nếu bật];
-  * số instance run/boot/mig và tổng vCPU đã cấp;
-  * nhu cầu hiện tại;
+* Per VNF (17 dimensions):
+  * the 6 most recent load values;
+  * [H-step forecast, if enabled];
+  * number of run/boot/mig instances and total provisioned vCPU;
+  * current demand;
   * ρ (utilization);
   * latency/SLA;
   * backlog;
   * memory;
-  * hướng thay đổi gần nhất và số bước kể từ lần đó. Hai giá trị này giúp agent biết mình vừa tăng hay giảm,
-    để tránh đảo chiều, và giữ cho reward phạt oscillation vẫn Markov.
-* Toàn cục (4 chiều): tỉ lệ node đang bật, tỉ lệ slot đã dùng, sin/cos của giờ trong ngày.
+  * direction of the last change and the number of steps since it. These two values let the agent know whether it
+    just scaled up or down, so it can avoid reversals, and keep the oscillation-penalty reward Markov.
+* Global (4 dimensions): fraction of nodes on, fraction of slots used, sin/cos of the hour of day.
 
-**Reward** (luôn ≤ 0):
+**Reward** (always ≤ 0):
 
 ```
-r = −( w_sla·Σ vi_phạm_SLA + w_drop·Σ tỉ_lệ_drop + w_latency·Σ latency/SLA        ← ràng buộc SLA
-       + w_resource·số_vCPU + w_util·Σ(1 − utilization) + w_energy·năng_lượng       ← mục tiêu utilization
-       + w_osc·số_lần_đảo_chiều + w_scale·số_thao_tác_scale                         ← mục tiêu oscillation
-       + w_migration·Σ(chi_phí_cố_định + chi_phí_mem·mem) + w_invalid·số_action_sai )
+r = −( w_sla·Σ SLA_violations + w_drop·Σ drop_ratio + w_latency·Σ latency/SLA        ← SLA constraint
+       + w_resource·n_vCPU + w_util·Σ(1 − utilization) + w_energy·energy             ← utilization objective
+       + w_osc·n_reversals + w_scale·n_scaling_actions                                ← oscillation objective
+       + w_migration·Σ(fixed_cost + mem_cost·mem) + w_invalid·n_invalid_actions )
 ```
 
-Từng thành phần được trả về trong `info["reward_terms"]`, nên bạn dễ vẽ hình phân tích hoặc chỉnh trọng số.
+Each term is returned in `info["reward_terms"]`, so it is easy to plot analyses or tune the weights.
 
-## 5. Kịch bản quá tải
+## 5. Overload scenarios
 
-Có thể tạo kịch bản quá tải ngay từ trace thật (`augment_load`):
+Overload scenarios can be generated directly from the real trace (`augment_load`):
 
 ```python
 env = NFVScalingEnv(data_root=ROOT, split="test", episode_steps=None, random_start=False,
-                    load_multiplier=1.5,      # tải tăng 50%
-                    burst_prob=0.005,         # xác suất bắt đầu burst mỗi phút
+                    load_multiplier=1.5,      # load increased by 50%
+                    burst_prob=0.005,         # probability of a burst starting each minute
                     burst_scale=(1.5, 3.0),   # burst ×1.5–3
-                    burst_len=(3, 20),        # dài 3–20 phút
+                    burst_len=(3, 20),        # lasting 3–20 minutes
                     noise_std=0.05)
 ```
 
-Nên **train** với augmentation để agent quen với quá tải, rồi **test** trên trace gốc 18-02 cộng với một
-kịch bản quá tải cố định (cùng seed) để so sánh công bằng.
+**Train** with augmentation so the agent gets used to overload, then **test** on the original 18-02 trace plus a
+fixed overload scenario (same seed) for a fair comparison.
 
-## 6. Kết quả baseline trên ngày test (chạy thử)
+## 6. Baseline results on the test day (trial run)
 
-| Kịch bản | Policy | Utilization | Oscillation | Thao tác scale | Vi phạm SLA | vCPU TB |
+| Scenario | Policy | Utilization | Oscillation | Scaling actions | SLA violations | Avg vCPU |
 |---|---|---|---|---|---|---|
-| normal | static (cấp theo đỉnh) | 0,20 | 0 | 17 | 0,2% | 20,0 |
-| normal | threshold (HPA 80%/40%) | 0,51 | 166 | 370 | 10,3% | 8,0 |
-| normal | vertical (VPA) | 0,51 | 160 | 348 | 8,8% | 8,0 |
-| normal | hybrid | 0,53 | 182 | 389 | 13,2% | 8,0 |
-| normal | predictive (oracle) | 0,51 | 238 | 496 | 5,6% | 7,8 |
-| overload | static | 0,32 | 0 | 17 | 6,9% | 20,0 |
-| overload | threshold | 0,55 | 192 | 490 | 15,1% | 11,6 |
-| overload | vertical | 0,56 | 183 | 458 | 13,2% | 11,8 |
-| overload | hybrid | 0,59 | 180 | 441 | 16,6% | 11,8 |
-| overload | predictive (oracle) | 0,55 | 254 | 700 | 8,4% | 11,5 |
+| normal | static (provisioned for peak) | 0.20 | 0 | 17 | 0.2% | 20.0 |
+| normal | threshold (HPA 80%/40%) | 0.51 | 166 | 370 | 10.3% | 8.0 |
+| normal | vertical (VPA) | 0.51 | 160 | 348 | 8.8% | 8.0 |
+| normal | hybrid | 0.53 | 182 | 389 | 13.2% | 8.0 |
+| normal | predictive (oracle) | 0.51 | 238 | 496 | 5.6% | 7.8 |
+| overload | static | 0.32 | 0 | 17 | 6.9% | 20.0 |
+| overload | threshold | 0.55 | 192 | 490 | 15.1% | 11.6 |
+| overload | vertical | 0.56 | 183 | 458 | 13.2% | 11.8 |
+| overload | hybrid | 0.59 | 180 | 441 | 16.6% | 11.8 |
+| overload | predictive (oracle) | 0.55 | 254 | 700 | 8.4% | 11.5 |
 
-Bảng cho thấy ba điều:
+The table shows three things:
 
-* Static gần như không vi phạm SLA và không dao động, nhưng utilization chỉ 20–30%.
-* Threshold và vertical đưa utilization lên khoảng 50%, nhưng đảo chiều liên tục (khoảng 1 lần mỗi 8 phút)
-  và vi phạm SLA nhiều do độ trễ boot.
-* Predictive (dự báo hoàn hảo) giảm vi phạm SLA, nhưng **dao động còn nhiều hơn** vì nó bám sát từng đỉnh tải.
+* Static has almost no SLA violations and no oscillation, but utilization is only 20–30%.
+* Threshold and vertical raise utilization to about 50%, but reverse direction constantly (about once every
+  8 minutes) and violate the SLA often because of boot latency.
+* Predictive (perfect forecast) reduces SLA violations, but **oscillates even more** because it tracks every load peak.
 
-Agent RL cần đồng thời đạt utilization cao, SLA tốt và oscillation thấp. Đây chính là khoảng trống mà đề tài
-nhắm tới.
+An RL agent has to achieve high utilization, good SLA compliance and low oscillation at the same time. This is the
+gap the thesis targets.
 
-## 7. Nối với Bước 4 (dự báo)
+## 7. Connecting to Step 4 (forecasting)
 
-Truyền forecaster của bạn vào env. Forecaster nhận `(env, t_idx)` và trả về mảng `(H, n_vnf)` chứa tải
-chuẩn hoá dự báo:
+Pass your forecaster into the env. The forecaster receives `(env, t_idx)` and returns an `(H, n_vnf)` array of
+forecast normalised load:
 
 ```python
 def my_forecaster(env, t):
-    hist = env._load[max(0, t-64):t+1]          # lịch sử tải (đã chuẩn hoá)
+    hist = env._load[max(0, t-64):t+1]          # load history (normalised)
     return model.predict(hist)                  # (H, n_vnf)  — Lag-Llama / TimesFM / LSTM ...
 
 env = NFVScalingEnv(data_root=ROOT, forecast_horizon=5, forecaster=my_forecaster)
 ```
 
-Nếu `forecast_horizon>0` mà không truyền forecaster, env dùng **oracle** (giá trị thật trong tương lai).
-Oracle chỉ để đo cận trên, không được báo cáo như kết quả thật.
+If `forecast_horizon>0` and no forecaster is passed, the env uses an **oracle** (the true future values).
+The oracle is only for measuring an upper bound and must not be reported as a real result.
 
-## 8. Các tham số hay chỉnh (`SimConfig`)
+## 8. Commonly tuned parameters (`SimConfig`)
 
-| Nhóm | Tham số |
+| Group | Parameters |
 |---|---|
-| Thời gian | `step_minutes` (gộp k phút/bước, lấy max tải trong bước), `episode_steps` |
-| Hạ tầng | `n_nodes`, `node_slots`, `min_instances`, `max_instances` |
-| Độ trễ | `scale_out_delay`, `vertical_delay`, `migration_base_delay`, `migration_mem_delay`, `migration_capacity` |
+| Time | `step_minutes` (aggregate k minutes per step, taking the max load within the step), `episode_steps` |
+| Infrastructure | `n_nodes`, `node_slots`, `min_instances`, `max_instances` |
+| Delays | `scale_out_delay`, `vertical_delay`, `migration_base_delay`, `migration_mem_delay`, `migration_capacity` |
 | Vertical | `enable_vertical`, `max_vcpu`, `vertical_alpha` |
 | Oscillation | `osc_window`, `w_osc`, `w_scale` |
-| Chi phí | `w_*`, `migration_fixed_cost`, `migration_mem_cost`, `p_idle`, `p_max` |
+| Cost | `w_*`, `migration_fixed_cost`, `migration_mem_cost`, `p_idle`, `p_max` |
 | SLA | `base_latency_ms`, `sla_ms`, `buffer_steps` |
 
-## 9. Giới hạn cần nêu trong luận văn
+## 9. Limitations to state in the thesis
 
-* Thang tải tuyệt đối bị mất do dữ liệu đã chuẩn hoá. Số instance ở đỉnh (`peak_instances`) là giả định.
-* Hiệu suất vertical (size^α, α = 0,9) và độ trễ vertical là giả định, không đo từ SNDZoo.
-* Mô hình độ trễ là xấp xỉ hàng đợi M/M/1 cộng backlog, không mô phỏng ở mức gói tin.
-* Ba VNF trong SNDZoo là ba dịch vụ độc lập, không phải một chuỗi SFC. Chúng chỉ chia sẻ hạ tầng
-  (node), nên tác động qua lại nằm ở phần năng lượng và migration.
-* Trong dữ liệu có khoảng ~2 giờ tải ≈ 0 (08:00–10:00, do thí nghiệm khởi động lại), sau đó tải tăng vọt
-  lúc 10:00. Đoạn này vô tình tạo ra một kịch bản "tải tăng đột ngột" tốt để kiểm thử.
+* The absolute load scale is lost because the data is normalised. The peak instance counts (`peak_instances`) are assumptions.
+* Vertical efficiency (size^α, α = 0.9) and vertical delay are assumptions, not measured from SNDZoo.
+* The latency model is an M/M/1 queueing approximation plus backlog, not a packet-level simulation.
+* The three VNFs in SNDZoo are three independent services, not an SFC chain. They only share infrastructure
+  (nodes), so their interaction is limited to energy and migration.
+* The data contains about 2 hours of near-zero load (08:00–10:00, due to an experiment restart), followed by a
+  sudden surge at 10:00. This accidentally provides a good "sudden load spike" scenario for testing.

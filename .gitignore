@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# Virtual env
+.venv/
+venv/
+env/
+
+# Kết quả train / dữ liệu sinh ra (có thể tái tạo)
+runs/
+logs/
+tensorboard/
+wandb/
+*.zip
+*.pt
+*.pth
+*.ckpt
+*.npz
+*.pkl
+outputs/
+results/
+
+# Dữ liệu lớn (SNDZoo nằm ngoài repo, tránh lỡ copy vào)
+*.csv
+data/
+
+# Claude Code: chỉ giữ CLAUDE.md, bỏ cấu hình cá nhân
+.claude/settings.local.json
+CLAUDE.local.md
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
