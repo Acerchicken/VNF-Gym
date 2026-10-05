@@ -30,6 +30,7 @@ pip install stable-baselines3         # only needed to train PPO/DQN (pulls in P
 python examples\check_env.py     --data "E:/SNDZoo dataset/SNDZoo dataset/DatasetSNDZoo"
 python examples\run_baselines.py --data "E:/SNDZoo dataset/SNDZoo dataset/DatasetSNDZoo"
 python examples\train_ppo.py     --data "E:/SNDZoo dataset/SNDZoo dataset/DatasetSNDZoo" --steps 300000
+python examples\play.py          --data "E:/SNDZoo dataset/SNDZoo dataset/DatasetSNDZoo"   # step through the simulator by hand
 ```
 
 Outputs (`baselines.csv`, `capacity_*.png` plots, the PPO model) are written to the `results/` folder.
