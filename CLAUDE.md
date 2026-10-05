@@ -22,13 +22,14 @@ Lộ trình: (1–2) dữ liệu SNDZoo → **(3) simulator Gymnasium — đã x
 python examples\check_env.py     --data "E:/SNDZoo dataset/SNDZoo dataset/DatasetSNDZoo"
 python examples\run_baselines.py --data "E:/SNDZoo dataset/SNDZoo dataset/DatasetSNDZoo"
 python examples\train_ppo.py     --data "E:/SNDZoo dataset/SNDZoo dataset/DatasetSNDZoo" --steps 300000
+python examples\play.py          --data "E:/SNDZoo dataset/SNDZoo dataset/DatasetSNDZoo"   # chạy tay từng bước để hiểu simulator
 ```
 
 ## Cấu trúc
 - `nfv_sim/data.py` — đọc/căn chỉnh SNDZoo, `augment_load` tạo kịch bản quá tải.
 - `nfv_sim/env.py` — `NFVScalingEnv` + `SimConfig` (mọi tham số ở đây).
 - `nfv_sim/baselines.py` — Static, Threshold (mode horizontal/vertical/hybrid, consolidate), PredictiveThreshold (oracle).
-- `examples/` — check_env, run_baselines, train_ppo. Các script gọi `sys.stdout.reconfigure(encoding="utf-8")`
+- `examples/` — check_env, run_baselines, train_ppo, play (nhập action bằng tay). Các script gọi `sys.stdout.reconfigure(encoding="utf-8")`
   vì console Windows cp1252 không in được tiếng Việt — giữ dòng này khi viết script mới.
 - `README.md` — mô tả chi tiết mô hình, state/action/reward, bảng baseline, giới hạn.
 
