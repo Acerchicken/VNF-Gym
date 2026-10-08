@@ -19,15 +19,18 @@ Lộ trình: (1–2) dữ liệu SNDZoo → **(3) simulator Gymnasium — đã x
 
 ## Lệnh
 ```
-python examples\check_env.py     --data "E:/SNDZoo dataset/SNDZoo dataset/DatasetSNDZoo"
-python examples\run_baselines.py --data "E:/SNDZoo dataset/SNDZoo dataset/DatasetSNDZoo"
-python examples\train_ppo.py     --data "E:/SNDZoo dataset/SNDZoo dataset/DatasetSNDZoo" --steps 300000
-python examples\play.py          --data "E:/SNDZoo dataset/SNDZoo dataset/DatasetSNDZoo"   # chạy tay từng bước để hiểu simulator
+python examples\check_env.py
+python examples\run_baselines.py
+python examples\train_ppo.py
+python examples\play.py          # chạy tay từng bước để hiểu simulator
 ```
+Đường dẫn dữ liệu và mọi tham số lấy từ `nfv_sim/config.py`; tham số dòng lệnh (`--data`, `--steps`…) chỉ để ghi đè.
 
 ## Cấu trúc
+- `nfv_sim/config.py` — **MỌI tham số**: đường dẫn, dữ liệu, `SimConfig`, `SCENARIOS`, `BASELINE`, `TRAIN`/`PPO`, `PLAY`.
+  Không đặt hằng số/tham số ở file khác; thêm tham số mới vào đây rồi import.
 - `nfv_sim/data.py` — đọc/căn chỉnh SNDZoo, `augment_load` tạo kịch bản quá tải.
-- `nfv_sim/env.py` — `NFVScalingEnv` + `SimConfig` (mọi tham số ở đây).
+- `nfv_sim/env.py` — `NFVScalingEnv` (đọc tham số từ `SimConfig` trong config.py).
 - `nfv_sim/baselines.py` — Static, Threshold (mode horizontal/vertical/hybrid, consolidate), PredictiveThreshold (oracle).
 - `examples/` — check_env, run_baselines, train_ppo, play (nhập action bằng tay). Các script gọi `sys.stdout.reconfigure(encoding="utf-8")`
   vì console Windows cp1252 không in được tiếng Việt — giữ dòng này khi viết script mới.

@@ -6,6 +6,7 @@ from typing import Callable, Dict, Optional
 
 import numpy as np
 
+from .config import BASELINE
 from .env import NFVScalingEnv
 
 
@@ -14,7 +15,7 @@ class StaticPolicy:
 
     def __init__(self, env: NFVScalingEnv, target: Optional[Dict[str, int]] = None):
         self.env = env
-        self.target = target or {v: int(math.ceil(env.peak[j] / 0.8)) for j, v in enumerate(env.vnfs)}
+        self.target = target or {v: int(math.ceil(env.peak[j] / BASELINE["static_target_util"])) for j, v in enumerate(env.vnfs)}
 
     def __call__(self, obs):
         deltas = []
@@ -34,8 +35,9 @@ class ThresholdPolicy:
                        gỡ cả instance (giải phóng slot, dễ tắt node), chỉ bớt vCPU khi đã ở
                        min_instances."""
 
-    def __init__(self, env: NFVScalingEnv, upper: float = 0.8, lower: float = 0.4,
-                 cooldown: int = 3, consolidate: bool = False, mode: str = "horizontal"):
+    def __init__(self, env: NFVScalingEnv, upper: float = BASELINE["upper"],
+                 lower: float = BASELINE["lower"], cooldown: int = BASELINE["cooldown"],
+                 consolidate: bool = False, mode: str = "horizontal"):
         self.env, self.upper, self.lower, self.cooldown = env, upper, lower, cooldown
         self.consolidate, self.mode = consolidate, mode
         self.last = [-10**9] * env.n_vnf
@@ -66,7 +68,7 @@ class ThresholdPolicy:
                         d = -1
             if d != 0 or v != 0:
                 self.last[j] = env.t
-            elif self.consolidate and fragmented and st["mig"] == 0 and env.t % 10 == j:
+            elif self.consolidate and fragmented and st["mig"] == 0 and env.t % BASELINE["consolidate_every"] == j:
                 m = True
             deltas.append(d); mig.append(m); vert.append(v)
         return env.delta_to_action(deltas, mig, vert)

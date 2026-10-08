@@ -1,6 +1,6 @@
 """Kiểm tra env đúng chuẩn Gymnasium và chạy thử 1 episode ngẫu nhiên.
 
-    python examples/check_env.py --data "E:/SNDZoo dataset/SNDZoo dataset/DatasetSNDZoo"
+    python examples/check_env.py            (đường dẫn dữ liệu lấy từ nfv_sim/config.py)
 """
 import argparse
 import os
@@ -13,9 +13,10 @@ if hasattr(sys.stdout, "reconfigure"):  # console Windows (cp1252) không in đ�
 from gymnasium.utils.env_checker import check_env
 
 from nfv_sim import NFVScalingEnv, load_sndzoo
+from nfv_sim.config import DATA_ROOT
 
 p = argparse.ArgumentParser()
-p.add_argument("--data", required=True, help="đường dẫn thư mục DatasetSNDZoo")
+p.add_argument("--data", default=DATA_ROOT, help="thư mục DatasetSNDZoo (mặc định lấy từ config.py)")
 args = p.parse_args()
 
 train = load_sndzoo(args.data, "train")

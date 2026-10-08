@@ -1,6 +1,6 @@
 """So sánh các baseline trên ngày test 18-02, ở kịch bản bình thường và quá tải.
 
-    python examples/run_baselines.py --data "E:/SNDZoo dataset/SNDZoo dataset/DatasetSNDZoo"
+    python examples/run_baselines.py            (tham số lấy từ nfv_sim/config.py)
 """
 import argparse
 import os
@@ -15,18 +15,15 @@ import pandas as pd
 
 from nfv_sim import (NFVScalingEnv, PredictiveThresholdPolicy, StaticPolicy, ThresholdPolicy,
                      load_sndzoo, run_episode)
+from nfv_sim.config import DATA_ROOT, EVAL_SEED, RESULTS_DIR, SCENARIOS
 
 p = argparse.ArgumentParser()
-p.add_argument("--data", required=True)
-p.add_argument("--out", default="results")
+p.add_argument("--data", default=DATA_ROOT, help="thư mục DatasetSNDZoo (mặc định lấy từ config.py)")
+p.add_argument("--out", default=RESULTS_DIR)
 args = p.parse_args()
 os.makedirs(args.out, exist_ok=True)
 
 test = load_sndzoo(args.data, "test")
-SCENARIOS = {
-    "normal": {},
-    "overload": dict(load_multiplier=1.5, burst_prob=0.005),
-}
 POLICIES = {
     "static": lambda e: StaticPolicy(e),
     "threshold": lambda e: ThresholdPolicy(e),
@@ -40,7 +37,7 @@ rows, traces = {}, {}
 for sname, kw in SCENARIOS.items():
     for pname, make in POLICIES.items():
         env = NFVScalingEnv(traces=test, episode_steps=None, random_start=False, **kw)
-        summary, tr = run_episode(env, make(env), seed=1, record=True)
+        summary, tr = run_episode(env, make(env), seed=EVAL_SEED, record=True)
         rows[(sname, pname)] = summary
         traces[(sname, pname)] = tr
 

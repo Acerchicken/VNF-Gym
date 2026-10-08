@@ -1,5 +1,6 @@
-from .data import load_sndzoo, augment_load, TraceSet, VNF_NAMES
-from .env import NFVScalingEnv, SimConfig
+from .config import SimConfig, VNF_NAMES
+from .data import load_sndzoo, augment_load, TraceSet
+from .env import NFVScalingEnv
 from .baselines import StaticPolicy, ThresholdPolicy, PredictiveThresholdPolicy, run_episode
 
 try:

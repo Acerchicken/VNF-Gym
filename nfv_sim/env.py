@@ -48,90 +48,17 @@ Mọi thành phần nằm trong info["reward_terms"] để phân tích.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field, asdict
-from typing import Callable, Dict, List, Optional, Sequence
+from dataclasses import asdict
+from typing import Callable, List, Optional, Sequence
 
 import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
 
-from .data import TraceSet, augment_load, load_sndzoo, VNF_NAMES
+from .config import SimConfig
+from .data import TraceSet, augment_load, load_sndzoo
 
 BOOT, RUN, MIG = 0, 1, 2
-
-
-@dataclass
-class SimConfig:
-    # ---- dữ liệu ----
-    data_root: Optional[str] = None          # đường dẫn DatasetSNDZoo (nếu không truyền traces)
-    split: str = "train"                     # "train" | "test"
-    vnfs: Sequence[str] = VNF_NAMES
-    load_metric: str = "rx"                  # "rx" (traffic vào) hoặc "cpu"
-    step_minutes: int = 1                    # 1 bước quyết định = bao nhiêu phút dữ liệu
-    episode_steps: Optional[int] = 720       # None = chạy hết chuỗi
-    random_start: bool = True                # train: chọn điểm bắt đầu ngẫu nhiên
-
-    # ---- quy đổi tải ----
-    peak_instances: Dict[str, float] = field(
-        default_factory=lambda: {"WEB": 6.0, "IOT": 4.0, "SEC": 5.0})
-    # ---- kịch bản quá tải (augmentation) ----
-    load_multiplier: float = 1.0
-    noise_std: float = 0.0
-    burst_prob: float = 0.0
-    burst_scale: tuple = (1.5, 3.0)
-    burst_len: tuple = (3, 20)
-
-    # ---- hạ tầng ----
-    n_nodes: int = 6
-    node_slots: int = 4                      # vCPU mỗi node
-    min_instances: int = 1
-    max_instances: int = 10
-    initial_instances: Optional[Dict[str, int]] = None   # None -> min_instances
-
-    # ---- động học scale / migration ----
-    scale_out_delay: int = 3                 # số bước boot trước khi phục vụ
-    max_step_change: int = 1                 # K: mỗi bước thay đổi tối đa ±K instance
-    enable_vertical: bool = True             # thêm 2 action vertical up/down
-    max_vcpu: int = 4                        # vCPU tối đa của 1 instance (<= node_slots)
-    vertical_delay: int = 1                  # số bước trước khi vCPU thêm có hiệu lực
-    vertical_alpha: float = 0.9              # công suất instance = size**alpha
-    migration_base_delay: int = 1            # bước
-    migration_mem_delay: int = 3             # + ceil(mem_norm * giá trị này) bước
-    migration_capacity: float = 0.5          # công suất phục vụ khi đang migrate
-    migration_fixed_cost: float = 0.3
-    migration_mem_cost: float = 0.7          # * mem_norm của VNF tại thời điểm migrate
-
-    # ---- mô hình hiệu năng ----
-    base_latency_ms: Dict[str, float] = field(
-        default_factory=lambda: {"WEB": 20.0, "IOT": 5.0, "SEC": 10.0})
-    sla_ms: Dict[str, float] = field(
-        default_factory=lambda: {"WEB": 100.0, "IOT": 30.0, "SEC": 60.0})
-    rho_cap: float = 0.98
-    buffer_steps: float = 2.0                # backlog tối đa = buffer_steps * công suất
-
-    # ---- năng lượng ----
-    p_idle: float = 100.0                    # W mỗi node bật
-    p_max: float = 200.0
-
-    # ---- oscillation ----
-    osc_window: int = 10                     # đảo chiều trong vòng N bước bị tính là dao động
-
-    # ---- trọng số reward ----
-    w_sla: float = 1.0
-    w_drop: float = 2.0
-    w_latency: float = 0.05
-    w_resource: float = 0.03                 # mỗi vCPU đã cấp
-    w_util: float = 0.2                      # * Σ_j (1 - utilization_j)
-    w_energy: float = 0.5
-    w_migration: float = 1.0
-    w_scale: float = 0.02                    # mỗi thao tác scale thành công
-    w_osc: float = 0.5                       # mỗi lần đảo chiều (oscillation)
-    w_invalid: float = 0.1
-
-    # ---- quan sát ----
-    history_len: int = 6
-    forecast_horizon: int = 0                # >0: thêm dự báo vào observation
-    discrete_action: bool = False
 
 
 class _Inst:
@@ -421,7 +348,7 @@ class NFVScalingEnv(gym.Env):
                 c_i = self._eff(i.size) * (1.0 if i.state == RUN else cfg.migration_capacity)
                 busy_slots[i.node] += served[i.vnf] * c_i / cap[i.vnf]
             elif i.state == BOOT:
-                busy_slots[i.node] += 0.3            # boot cũng tiêu tốn CPU
+                busy_slots[i.node] += cfg.boot_cpu_load   # boot cũng tiêu tốn CPU
         on = used > 0
         node_util = np.clip(busy_slots / cfg.node_slots, 0, 1)
         power = np.where(on, cfg.p_idle + (cfg.p_max - cfg.p_idle) * node_util, 0.0)

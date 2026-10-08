@@ -1,6 +1,6 @@
 """Chạy simulator từng bước bằng tay để hiểu nó hoạt động thế nào.
 
-    python examples/play.py --data "E:/SNDZoo dataset/SNDZoo dataset/DatasetSNDZoo"
+    python examples/play.py            (tham số lấy từ nfv_sim/config.py)
 
 Mỗi bước nhập 3 số (cho WEB IOT SEC), cách nhau bởi dấu cách:
     0 = scale-in   1 = giữ   2 = scale-out   3 = migrate   4 = vertical +1 vCPU   5 = vertical -1 vCPU
@@ -15,14 +15,15 @@ if hasattr(sys.stdout, "reconfigure"):  # console Windows (cp1252) không in đ�
     sys.stdout.reconfigure(encoding="utf-8")
 
 from nfv_sim import NFVScalingEnv, load_sndzoo
+from nfv_sim.config import DATA_ROOT, PLAY
 
 p = argparse.ArgumentParser()
-p.add_argument("--data", required=True)
-p.add_argument("--start", type=int, default=600, help="phút bắt đầu trong ngày test")
+p.add_argument("--data", default=DATA_ROOT, help="thư mục DatasetSNDZoo (mặc định lấy từ config.py)")
+p.add_argument("--start", type=int, default=PLAY["start"], help="phút bắt đầu trong ngày test")
 args = p.parse_args()
 
 env = NFVScalingEnv(traces=load_sndzoo(args.data, "test"), episode_steps=None, random_start=False)
-obs, info = env.reset(seed=0, options={"start": args.start})
+obs, info = env.reset(seed=PLAY["seed"], options={"start": args.start})
 print(env.render())
 
 while True:

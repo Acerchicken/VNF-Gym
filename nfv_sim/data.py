@@ -20,19 +20,7 @@ from typing import Dict, List, Optional, Sequence
 import numpy as np
 import pandas as pd
 
-VNF_NAMES = ("WEB", "IOT", "SEC")  # Nginx, Mosquitto, Snort
-
-METRIC_FILES = {
-    "cpu": "container_cpu_usage_rate_normalized.csv",
-    "mem": "container_memory_working_set_bytes.csv",
-    "rx": "container_network_receive_bytes_total.csv",
-    "tx": "container_network_transmit_bytes_total.csv",
-}
-
-SPLIT_DIRS = {
-    "train": [os.path.join("TrainTest", "NoHoles"), "TrainTest"],
-    "test": [os.path.join("18-02", "CSVmergedFIXED"), os.path.join("18-02", "CSVmerged")],
-}
+from .config import MAX_GAP_MINUTES, METRIC_FILES, SPLIT_DIRS, VNF_NAMES
 
 
 def _read_series(path: str) -> pd.Series:
@@ -91,7 +79,7 @@ def load_sndzoo(
     split: str = "train",
     vnfs: Sequence[str] = VNF_NAMES,
     metrics: Sequence[str] = ("cpu", "mem", "rx", "tx"),
-    max_gap_minutes: int = 5,
+    max_gap_minutes: int = MAX_GAP_MINUTES,
 ) -> TraceSet:
     """Đọc và căn chỉnh dữ liệu.
 

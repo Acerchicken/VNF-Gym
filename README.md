@@ -24,13 +24,16 @@ pip install stable-baselines3         # only needed to train PPO/DQN (pulls in P
 > On Windows, avoid running `python -m pip install --upgrade pip` inside the venv unless necessary. pip can lock
 > its own files and corrupt the venv; if that happens, delete the `.venv` folder and recreate it.
 
-**Run** (the `--data` argument points to the **DatasetSNDZoo** folder):
+**Configure**: all parameters live in [`nfv_sim/config.py`](nfv_sim/config.py). Set `DATA_ROOT` there to your
+**DatasetSNDZoo** folder once; the scripts then need no arguments (`--data`, `--steps`, … still override it).
+
+**Run**:
 
 ```powershell
-python examples\check_env.py     --data "E:/SNDZoo dataset/SNDZoo dataset/DatasetSNDZoo"
-python examples\run_baselines.py --data "E:/SNDZoo dataset/SNDZoo dataset/DatasetSNDZoo"
-python examples\train_ppo.py     --data "E:/SNDZoo dataset/SNDZoo dataset/DatasetSNDZoo" --steps 300000
-python examples\play.py          --data "E:/SNDZoo dataset/SNDZoo dataset/DatasetSNDZoo"   # step through the simulator by hand
+python examples\check_env.py
+python examples\run_baselines.py
+python examples\train_ppo.py
+python examples\play.py          # step through the simulator by hand
 ```
 
 Outputs (`baselines.csv`, `capacity_*.png` plots, the PPO model) are written to the `results/` folder.
@@ -208,7 +211,21 @@ env = NFVScalingEnv(data_root=ROOT, forecast_horizon=5, forecaster=my_forecaster
 If `forecast_horizon>0` and no forecaster is passed, the env uses an **oracle** (the true future values).
 The oracle is only for measuring an upper bound and must not be reported as a real result.
 
-## 8. Commonly tuned parameters (`SimConfig`)
+## 8. Commonly tuned parameters (`nfv_sim/config.py`)
+
+Everything is in one file, grouped as:
+
+* paths: `DATA_ROOT`, `RESULTS_DIR`;
+* data: `VNF_NAMES`, `SPLIT_DIRS`, …;
+* simulator: `SimConfig`;
+* evaluation scenarios: `SCENARIOS`, `EVAL_SEED`;
+* baselines: `BASELINE`;
+* training: `TRAIN`, `TRAIN_AUGMENT`, `PPO`;
+* `play.py`: `PLAY`.
+
+To try a value without editing the file, override it when creating the env: `NFVScalingEnv(traces=..., w_osc=1.0)`.
+
+Most-tuned `SimConfig` fields:
 
 | Group | Parameters |
 |---|---|
