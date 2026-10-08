@@ -1,6 +1,9 @@
 """So sánh các baseline trên ngày test 18-02, ở kịch bản bình thường và quá tải.
 
-    python examples/run_baselines.py            (tham số lấy từ nfv_sim/config.py)
+    python examples/run_baselines.py                          (tham số lấy từ nfv_sim/config.py)
+    python examples/run_baselines.py --forecasters lstm linear
+
+Mỗi forecaster đã train (examples/train_forecaster.py) tạo thêm một policy "predictive(<tên>)".
 """
 import argparse
 import os
@@ -15,11 +18,14 @@ import pandas as pd
 
 from nfv_sim import (NFVScalingEnv, PredictiveThresholdPolicy, StaticPolicy, ThresholdPolicy,
                      load_sndzoo, run_episode)
-from nfv_sim.config import DATA_ROOT, EVAL_SEED, RESULTS_DIR, SCENARIOS
+from nfv_sim.config import DATA_ROOT, EVAL_SEED, FORECAST, RESULTS_DIR, SCENARIOS
+from nfv_sim.forecast import load_forecaster
 
 p = argparse.ArgumentParser()
 p.add_argument("--data", default=DATA_ROOT, help="thư mục DatasetSNDZoo (mặc định lấy từ config.py)")
 p.add_argument("--out", default=RESULTS_DIR)
+p.add_argument("--forecasters", nargs="*", default=[FORECAST["default"]],
+               help="forecaster đã train dùng cho PredictiveThresholdPolicy")
 args = p.parse_args()
 os.makedirs(args.out, exist_ok=True)
 
@@ -32,6 +38,13 @@ POLICIES = {
     "hybrid": lambda e: ThresholdPolicy(e, mode="hybrid"),
     "predictive(oracle)": lambda e: PredictiveThresholdPolicy(e),
 }
+for fname in args.forecasters:
+    try:
+        fc = load_forecaster(fname)
+    except FileNotFoundError as ex:
+        print(f"Bỏ qua predictive({fname}): {ex}")
+        continue
+    POLICIES[f"predictive({fname})"] = lambda e, fc=fc: PredictiveThresholdPolicy(e, forecast_fn=fc.demand_fn())
 
 rows, traces = {}, {}
 for sname, kw in SCENARIOS.items():

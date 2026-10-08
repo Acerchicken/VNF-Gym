@@ -155,6 +155,7 @@ TRAIN = dict(
     n_envs=8,                # số env song song
     episode_steps=720,       # độ dài 1 episode train (phút)
     forecast_horizon=0,      # >0: thêm dự báo vào state (mặc định oracle)
+    forecaster=None,         # tên forecaster đã train (vd "lstm") -> dùng thay oracle, horizon = FORECAST["horizon"]
     seed=0,
 )
 # augmentation khi train để agent quen với quá tải (test vẫn dùng trace gốc)

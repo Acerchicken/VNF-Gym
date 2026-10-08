@@ -195,18 +195,52 @@ The table shows three things:
 An RL agent has to achieve high utilization, good SLA compliance and low oscillation at the same time. This is the
 gap the thesis targets.
 
-## 7. Connecting to Step 4 (forecasting)
+## 7. Step 4 — load forecasting (`nfv_sim/forecast/`)
 
-Pass your forecaster into the env. The forecaster receives `(env, t_idx)` and returns an `(H, n_vnf)` array of
-forecast normalised load:
+```
+python examples\train_forecaster.py                 # train + compare every registered forecaster
+python examples\run_baselines.py --forecasters lstm  # adds a "predictive(lstm)" policy
+python examples\train_ppo.py --forecaster lstm       # forecast goes into the RL state
+```
+
+Every algorithm is a subclass of `Forecaster` (`nfv_sim/forecast/base.py`) registered by name.
+Built-in: `naive`, `moving_avg`, `linear` (ridge AR), `lstm` (PyTorch), `oracle` (upper bound only).
+Common parameters (`horizon`, `context_len`) live in `FORECAST`, per-model ones in `FORECASTERS` (config.py).
+Trained models are pickled to `results/forecasters/<name>.pkl`.
+
+A forecaster plugs into both consumers directly:
 
 ```python
-def my_forecaster(env, t):
-    hist = env._load[max(0, t-64):t+1]          # load history (normalised)
-    return model.predict(hist)                  # (H, n_vnf)  — Lag-Llama / TimesFM / LSTM ...
-
-env = NFVScalingEnv(data_root=ROOT, forecast_horizon=5, forecaster=my_forecaster)
+from nfv_sim.forecast import load_forecaster
+fc = load_forecaster("lstm")
+env = NFVScalingEnv(traces=test, forecast_horizon=fc.horizon, forecaster=fc)     # RL state
+policy = PredictiveThresholdPolicy(env, forecast_fn=fc.demand_fn())               # baseline
 ```
+
+**Adding a new algorithm** (Lag-Llama, TimesFM, GRU, …): one class + one config line.
+
+```python
+@register_forecaster("timesfm")
+class TimesFMForecaster(Forecaster):
+    def fit(self, train, val=None):        # optional (zero-shot models skip it)
+        return self
+    def predict_batch(self, windows):      # (N, L, n_vnf) history -> (N, H, n_vnf) forecast
+        ...
+```
+
+Import the module in `nfv_sim/forecast/__init__.py` and add `"timesfm": dict(...)` to `FORECASTERS`.
+All scripts then accept it by name, and `evaluate_forecaster` reports the same metrics
+(MAE/RMSE per horizon step, under-prediction rate, MAE at load peaks, MAE per VNF).
+
+First results on the test day (H=5, L=30, normalised load):
+
+| Forecaster | MAE | MAE t+1 | MAE t+5 | under-rate | peak MAE | predictive policy: oscillation / SLA viol. |
+|---|---|---|---|---|---|---|
+| lstm | 0.044 | 0.021 | 0.066 | 14.0% | 0.106 | 368 / 9.3% |
+| linear | 0.057 | 0.029 | 0.077 | 17.4% | 0.139 | 422 / 12.7% |
+| naive | 0.071 | 0.041 | 0.090 | 19.9% | 0.160 | 395 / 20.0% |
+| moving_avg | 0.080 | 0.062 | 0.093 | 21.7% | 0.183 | – |
+| oracle | 0 | 0 | 0 | 0 | 0 | 238 / 5.6% |
 
 If `forecast_horizon>0` and no forecaster is passed, the env uses an **oracle** (the true future values).
 The oracle is only for measuring an upper bound and must not be reported as a real result.
@@ -221,6 +255,7 @@ Everything is in one file, grouped as:
 * evaluation scenarios: `SCENARIOS`, `EVAL_SEED`;
 * baselines: `BASELINE`;
 * training: `TRAIN`, `TRAIN_AUGMENT`, `PPO`;
+* forecasting: `FORECAST`, `FORECASTERS`;
 * `play.py`: `PLAY`.
 
 To try a value without editing the file, override it when creating the env: `NFVScalingEnv(traces=..., w_osc=1.0)`.
