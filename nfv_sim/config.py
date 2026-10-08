@@ -9,6 +9,7 @@ Nhóm tham số:
     5. Baseline                BASELINE
     6. Train RL                TRAIN, TRAIN_AUGMENT, PPO
     7. Script play.py          PLAY
+    8. Dự báo tải              FORECAST, FORECASTERS
 
 Mọi module khác import từ đây; không đặt "số ma thuật" ở chỗ khác.
 Muốn thử một giá trị khác mà không sửa file, vẫn có thể ghi đè khi tạo env:
@@ -175,3 +176,35 @@ PLAY = dict(
     start=600,               # phút bắt đầu trong ngày test
     seed=0,
 )
+
+# =============================================================================
+# 8. DỰ BÁO TẢI (nfv_sim/forecast, examples/train_forecaster.py)
+# =============================================================================
+# Tham số chung cho mọi forecaster (từng model có thể ghi đè trong FORECASTERS).
+FORECAST = dict(
+    horizon=5,               # H: số bước dự báo (>= scale_out_delay để bù thời gian boot)
+    context_len=30,          # L: số bước lịch sử đưa vào model
+    val_frac=0.1,            # phần cuối tập train dùng làm validation (early stopping)
+    models_dir=os.path.join(RESULTS_DIR, "forecasters"),   # nơi lưu model đã train (<tên>.pkl)
+    default="lstm",          # forecaster dùng khi script không chỉ định
+)
+
+# Tham số riêng của từng thuật toán — key là tên đã đăng ký bằng @register_forecaster.
+# Thêm thuật toán mới: viết class trong nfv_sim/forecast/, đăng ký tên, rồi thêm một dòng ở đây.
+FORECASTERS = {
+    "naive": dict(),                         # giữ nguyên giá trị cuối
+    "moving_avg": dict(window=5),            # trung bình window bước gần nhất
+    "linear": dict(ridge=1e-2),              # hồi quy tuyến tính (AR) có ridge, dự báo trực tiếp H bước
+    "lstm": dict(
+        hidden_size=64,
+        num_layers=2,
+        dropout=0.1,
+        epochs=30,
+        batch_size=256,
+        lr=1e-3,
+        patience=5,          # early stopping: dừng sau N epoch val không cải thiện
+        under_weight=1.0,    # >1: phạt dự báo THẤP hơn thực tế nặng hơn (thiếu tài nguyên -> vi phạm SLA)
+        seed=0,
+    ),
+    "oracle": dict(),                        # tương lai thật — chỉ là cận trên, không báo cáo như kết quả thật
+}
