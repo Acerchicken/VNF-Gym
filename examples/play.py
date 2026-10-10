@@ -1,6 +1,6 @@
 """Chạy simulator từng bước bằng tay để hiểu nó hoạt động thế nào.
 
-    python examples/play.py            (tham số lấy từ nfv_sim/config.py)
+    python examples/play.py            (tham số lấy từ configs/config.py)
 
 Mỗi bước nhập 3 số (cho WEB IOT SEC), cách nhau bởi dấu cách:
     0 = scale-in   1 = giữ   2 = scale-out   3 = migrate   4 = vertical +1 vCPU   5 = vertical -1 vCPU

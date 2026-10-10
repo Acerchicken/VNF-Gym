@@ -25,10 +25,10 @@ python examples\train_ppo.py
 python examples\play.py          # chạy tay từng bước để hiểu simulator
 python examples\train_forecaster.py   # train + so sánh forecaster, lưu results/forecasters/<tên>.pkl
 ```
-Đường dẫn dữ liệu và mọi tham số lấy từ `nfv_sim/config.py`; tham số dòng lệnh (`--data`, `--steps`…) chỉ để ghi đè.
+Đường dẫn dữ liệu và mọi tham số lấy từ `configs/config.py`; tham số dòng lệnh (`--data`, `--steps`…) chỉ để ghi đè.
 
 ## Cấu trúc
-- `nfv_sim/config.py` — **MỌI tham số**: đường dẫn, dữ liệu, `SimConfig`, `SCENARIOS`, `BASELINE`, `TRAIN`/`PPO`, `PLAY`,
+- `configs/config.py` — **MỌI tham số** (`nfv_sim/config.py` chỉ chuyển tiếp tới đây): đường dẫn, dữ liệu, `SimConfig`, `SCENARIOS`, `BASELINE`, `TRAIN`/`PPO`, `PLAY`,
   `FORECAST` (chung) / `FORECASTERS` (riêng từng model).
   Không đặt hằng số/tham số ở file khác; thêm tham số mới vào đây rồi import.
 - `nfv_sim/data.py` — đọc/căn chỉnh SNDZoo, `augment_load` tạo kịch bản quá tải.

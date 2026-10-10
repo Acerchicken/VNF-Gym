@@ -24,7 +24,7 @@ pip install stable-baselines3         # only needed to train PPO/DQN (pulls in P
 > On Windows, avoid running `python -m pip install --upgrade pip` inside the venv unless necessary. pip can lock
 > its own files and corrupt the venv; if that happens, delete the `.venv` folder and recreate it.
 
-**Configure**: all parameters live in [`nfv_sim/config.py`](nfv_sim/config.py). Set `DATA_ROOT` there to your
+**Configure**: all parameters live in [`configs/config.py`](configs/config.py). Set `DATA_ROOT` there to your
 **DatasetSNDZoo** folder once; the scripts then need no arguments (`--data`, `--steps`, … still override it).
 
 **Run**:
@@ -245,7 +245,7 @@ First results on the test day (H=5, L=30, normalised load):
 If `forecast_horizon>0` and no forecaster is passed, the env uses an **oracle** (the true future values).
 The oracle is only for measuring an upper bound and must not be reported as a real result.
 
-## 8. Commonly tuned parameters (`nfv_sim/config.py`)
+## 8. Commonly tuned parameters (`configs/config.py`)
 
 Everything is in one file, grouped as:
 

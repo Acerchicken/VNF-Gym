@@ -1,6 +1,6 @@
 """Kiểm tra env đúng chuẩn Gymnasium và chạy thử 1 episode ngẫu nhiên.
 
-    python examples/check_env.py            (đường dẫn dữ liệu lấy từ nfv_sim/config.py)
+    python examples/check_env.py            (đường dẫn dữ liệu lấy từ configs/config.py)
 """
 import argparse
 import os

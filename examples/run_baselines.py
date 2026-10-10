@@ -1,6 +1,6 @@
 """So sánh các baseline trên ngày test 18-02, ở kịch bản bình thường và quá tải.
 
-    python examples/run_baselines.py                          (tham số lấy từ nfv_sim/config.py)
+    python examples/run_baselines.py                          (tham số lấy từ configs/config.py)
     python examples/run_baselines.py --forecasters lstm linear
 
 Mỗi forecaster đã train (examples/train_forecaster.py) tạo thêm một policy "predictive(<tên>)".

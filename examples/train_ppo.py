@@ -1,7 +1,7 @@
 """Huấn luyện PPO (Stable-Baselines3) trên tập train, đánh giá trên ngày test 18-02.
 
     pip install stable-baselines3
-    python examples/train_ppo.py            (tham số lấy từ nfv_sim/config.py: TRAIN, TRAIN_AUGMENT, PPO)
+    python examples/train_ppo.py            (tham số lấy từ configs/config.py: TRAIN, TRAIN_AUGMENT, PPO)
 
 Mẹo:
 * Train với augmentation (burst, nhân tải) để agent học xử lý quá tải; test trên trace gốc.
