@@ -19,7 +19,10 @@ Thêm một thuật toán mới (Lag-Llama, TimesFM, GRU, Prophet...) chỉ cầ
         def predict_batch(self, windows):       # (N, L, n_vnf) -> (N, H, n_vnf)
             ...
 
-rồi thêm `"my_model": dict(my_param=...)` vào FORECASTERS trong config.py. Sau đó mọi
+rồi thêm `"my_model": dict(my_param=...)` vào FORECASTERS trong config.py.
+
+Model dự báo khoảng (Bước 2) đặt `self.quantiles = (0.1, 0.5, 0.9)` và cài `predict_dist_batch`
+((N, L, n) -> (N, H, n, Q)); `predict_batch` khi đó trả về trung vị P50. Ví dụ: nfv_sim/forecast/neural.py. Sau đó mọi
 script (train_forecaster, run_baselines, train_ppo) dùng được qua `--forecaster my_model`.
 
 Quy ước dữ liệu: tải đã chuẩn hoá (giống `env._load`), mảng (T, n_vnf), float32.
@@ -182,6 +185,7 @@ class Forecaster:
 
     name = "base"
     needs_fit = True          # False: dùng được ngay không cần train (naive, oracle...)
+    quantiles: tuple = ()     # () = dự báo một giá trị; (0.1, 0.5, 0.9) = dự báo khoảng (P10/P50/P90)
     _CHUNK = 256              # số bước dự báo cùng lúc khi gọi trong env (tăng tốc)
     _MAX_SERIES = 32          # số chuỗi tải giữ cache cùng lúc (nhiều env dùng chung 1 forecaster)
 
@@ -198,27 +202,48 @@ class Forecaster:
         return self
 
     def predict_batch(self, windows: np.ndarray) -> np.ndarray:
-        """windows: (N, L, n_vnf) lịch sử -> (N, H, n_vnf) dự báo cho các bước tiếp theo."""
+        """windows: (N, L, n_vnf) lịch sử -> (N, H, n_vnf) dự báo cho các bước tiếp theo.
+        Model dự báo khoảng: mặc định trả về P50 của predict_dist_batch."""
+        if self.quantiles:
+            return self.predict_dist_batch(windows)[..., self.quantile_index(0.5)]
         raise NotImplementedError
+
+    def predict_dist_batch(self, windows: np.ndarray) -> np.ndarray:
+        """windows: (N, L, n_vnf) -> (N, H, n_vnf, Q) theo thứ tự self.quantiles (chỉ model dự báo khoảng)."""
+        raise NotImplementedError(f"{self.name} không dự báo khoảng")
+
+    def quantile_index(self, q: float) -> int:
+        for i, x in enumerate(self.quantiles):
+            if abs(x - q) < 1e-6:
+                return i
+        raise ValueError(f"{self.name} không có quantile {q} (có: {self.quantiles})")
 
     # ---- dùng chung ----
     def predict(self, history: np.ndarray) -> np.ndarray:
         """history: (L, n_vnf) -> (H, n_vnf)."""
         return self.predict_batch(np.asarray(history, np.float32)[None])[0]
 
-    def forecast_series(self, load: np.ndarray, t_idx) -> np.ndarray:
+    def forecast_series(self, load: np.ndarray, t_idx, quantiles: Optional[Sequence[float]] = None) -> np.ndarray:
         """Dự báo tại các thời điểm t_idx trên chuỗi load: (N, H, n_vnf).
-        Chỉ dùng dữ liệu <= t (oracle ghi đè hàm này để nhìn tương lai)."""
+        quantiles (vd (0.5, 0.9)): trả về (N, H, n_vnf, len(quantiles)); model dự báo một giá trị thì
+        mọi quantile = giá trị đó. Chỉ dùng dữ liệu <= t (oracle ghi đè hàm này để nhìn tương lai)."""
         windows = make_windows(load, t_idx, self.context_len).astype(np.float32)
-        out = np.asarray(self.predict_batch(windows), np.float32)
-        return np.clip(out, 0.0, None)
+        if quantiles is None:
+            out = self.predict_batch(windows)
+        elif self.quantiles:
+            out = self.predict_dist_batch(windows)[..., [self.quantile_index(q) for q in quantiles]]
+        else:
+            out = np.repeat(np.asarray(self.predict_batch(windows))[..., None], len(quantiles), axis=-1)
+        return np.clip(np.asarray(out, np.float32), 0.0, None)
 
-    def __call__(self, env, t: int, horizon: Optional[int] = None) -> np.ndarray:
-        """Giao diện forecaster của NFVScalingEnv: f(env, t) -> (H, n_vnf).
+    def __call__(self, env, t: int, horizon: Optional[int] = None,
+                 quantiles: Optional[Sequence[float]] = None) -> np.ndarray:
+        """Giao diện forecaster của NFVScalingEnv: f(env, t) -> (H, n_vnf), hoặc (H, n_vnf, Q) khi có quantiles.
         Dự báo theo khối _CHUNK bước rồi cache theo từng chuỗi env._load."""
         H = horizon or env.cfg.forecast_horizon or self.horizon
         if H > self.horizon:
             raise ValueError(f"{self.name}: model dự báo {self.horizon} bước, env yêu cầu {H}")
+        q = tuple(quantiles) if quantiles else None
         load = env._load
         entry = self._cache.get(id(load))
         if entry is None or entry[0] is not load:
@@ -227,19 +252,23 @@ class Forecaster:
             entry = self._cache[id(load)] = (load, {})
         chunks = entry[1]
         c = t // self._CHUNK
-        if c not in chunks:
+        if (c, q) not in chunks:
             lo = c * self._CHUNK
-            chunks[c] = self.forecast_series(load, np.arange(lo, min(lo + self._CHUNK, len(load))))
-        return chunks[c][t - c * self._CHUNK, :H]
+            chunks[(c, q)] = self.forecast_series(load, np.arange(lo, min(lo + self._CHUNK, len(load))), q)
+        return chunks[(c, q)][t - c * self._CHUNK, :H]
 
-    def demand_fn(self, lookahead: Optional[int] = None) -> Callable:
+    def demand_fn(self, lookahead: Optional[int] = None, quantile: Optional[float] = None) -> Callable:
         """Hàm cho PredictiveThresholdPolicy: env -> (n_vnf,) nhu cầu (vCPU) lớn nhất
-        từ hiện tại tới `lookahead` bước sau (mặc định = scale_out_delay)."""
+        từ hiện tại tới `lookahead` bước sau (mặc định = scale_out_delay).
+        quantile (vd 0.9): cấp theo P90 thay vì P50 -> dự phòng cho burst."""
 
         def fn(env):
             L = lookahead or env.cfg.scale_out_delay
             t = env.t0 + env.t
-            fc = self(env, t, horizon=min(L, self.horizon))
+            if quantile is None:
+                fc = self(env, t, horizon=min(L, self.horizon))
+            else:
+                fc = self(env, t, horizon=min(L, self.horizon), quantiles=(quantile,))[..., 0]
             return np.maximum(env._load[t], fc.max(axis=0)) * env.peak
 
         return fn

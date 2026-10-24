@@ -73,8 +73,9 @@ class OracleForecaster(Forecaster):
 
     needs_fit = False
 
-    def forecast_series(self, load, t_idx):
-        return make_targets(load, t_idx, self.horizon).astype(np.float32)
+    def forecast_series(self, load, t_idx, quantiles=None):
+        out = make_targets(load, t_idx, self.horizon).astype(np.float32)
+        return out if quantiles is None else np.repeat(out[..., None], len(quantiles), axis=-1)
 
     def predict_batch(self, windows):
         raise RuntimeError("Oracle cần biết tương lai — dùng forecast_series/env, không dùng predict")

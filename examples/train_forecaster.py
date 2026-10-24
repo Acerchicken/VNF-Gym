@@ -35,8 +35,9 @@ ALGOS = {  # one-line description of each algorithm for --help
     "naive": "repeat the last observed value (simplest baseline)",
     "moving_avg": "mean of the most recent steps",
     "linear": "linear autoregression (AR) with ridge regularization",
-    "lstm": "LSTM neural network (requires PyTorch)",
-    "lstm_snd": "LSTM trained on SNDZoo only (Step 0 reference)",
+    "lstm": "LSTM with P10/P50/P90 range forecast (requires PyTorch)",
+    "lstm_snd": "LSTM, single value, trained on SNDZoo only (Step 0 reference)",
+    "lstm_point": "LSTM, single value, trained on every dataset (Step 1)",
     "oracle": "sees the future = upper bound, for reference only, not a real result",
 }
 EPILOG = "Available algorithms:\n" + "\n".join(

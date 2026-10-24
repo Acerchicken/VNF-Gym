@@ -221,6 +221,7 @@ FORECAST = dict(
     horizon=5,               # H: số bước dự báo (>= scale_out_delay để bù thời gian boot)
     context_len=30,          # L: số bước lịch sử đưa vào model
     val_frac=0.1,            # phần cuối tập train dùng làm validation (early stopping)
+    quantiles=(0.1, 0.5, 0.9),   # mức quantile của model dự báo khoảng (P10/P50/P90); phải có 0.5
     # dataset (key của DATASETS) dùng để train; từng model ghi đè được bằng train_datasets=... trong FORECASTERS
     train_datasets=("sndzoo", "nab_aws", "google_machines", "alibaba_cluster", "cluster_5min"),
     # dataset dùng để đánh giá (phần test của từng chuỗi); bảng chính vẫn là sndzoo
@@ -241,6 +242,7 @@ FORECASTERS = {
     "moving_avg": dict(window=5),            # trung bình window bước gần nhất
     "linear": dict(ridge=1e-2),              # hồi quy tuyến tính (AR) có ridge, dự báo trực tiếp H bước
     "lstm": dict(
+        quantiles=FORECAST["quantiles"],   # () = dự báo một giá trị (loss MSE)
         hidden_size=64,
         num_layers=2,
         dropout=0.1,
@@ -248,11 +250,15 @@ FORECASTERS = {
         batch_size=256,
         lr=1e-3,
         patience=5,          # early stopping: dừng sau N epoch val không cải thiện
-        under_weight=1.0,    # >1: phạt dự báo THẤP hơn thực tế nặng hơn (thiếu tài nguyên -> vi phạm SLA)
+        under_weight=1.0,    # chỉ khi quantiles=(): >1 phạt dự báo THẤP hơn thực tế nặng hơn
         seed=0,
     ),
-    # LSTM cũ (Bước 0): chỉ train trên SNDZoo — mốc so sánh cho việc train trên nhiều dataset
-    "lstm_snd": dict(model="lstm", train_datasets=("sndzoo",), hidden_size=64, num_layers=2, dropout=0.1,
-                     epochs=30, batch_size=256, lr=1e-3, patience=5, under_weight=1.0, seed=0),
+    # --- các biến thể để so sánh từng bước (ablation) ---
+    # Bước 0: LSTM cũ, một giá trị, chỉ train trên SNDZoo
+    "lstm_snd": dict(model="lstm", quantiles=(), train_datasets=("sndzoo",), hidden_size=64, num_layers=2,
+                     dropout=0.1, epochs=30, batch_size=256, lr=1e-3, patience=5, seed=0),
+    # Bước 1: một giá trị, train trên mọi dataset
+    "lstm_point": dict(model="lstm", quantiles=(), hidden_size=64, num_layers=2, dropout=0.1,
+                       epochs=30, batch_size=256, lr=1e-3, patience=5, seed=0),
     "oracle": dict(),                        # tương lai thật — chỉ là cận trên, không báo cáo như kết quả thật
 }
