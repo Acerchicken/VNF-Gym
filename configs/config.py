@@ -267,5 +267,18 @@ FORECASTERS = {
     "lstm_q": dict(model="lstm", use_context=False, hidden_size=64, num_layers=2, dropout=0.1,
                    epochs=30, batch_size=256, lr=1e-3, patience=5, seed=0),
     # (Bước 3 = "lstm" ở trên: dự báo khoảng + thông tin phụ)
+    # Bước 4: Temporal Fusion Transformer (nfv_sim/forecast/tft.py), cùng dữ liệu và thông tin phụ như "lstm"
+    "tft": dict(
+        quantiles=FORECAST["quantiles"],
+        d_model=32,          # độ dài vector bên trong mọi khối (embedding, GRN, LSTM, attention)
+        n_heads=4,           # số head attention
+        dropout=0.1,
+        id_dropout=0.1,
+        epochs=30,
+        batch_size=256,
+        lr=1e-3,
+        patience=5,
+        seed=0,
+    ),
     "oracle": dict(),                        # tương lai thật — chỉ là cận trên, không báo cáo như kết quả thật
 }

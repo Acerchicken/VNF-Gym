@@ -17,7 +17,7 @@ from .metrics import evaluate_by_dataset, evaluate_forecaster
 from . import simple  # noqa: F401  (đăng ký naive, moving_avg, linear, oracle)
 
 try:
-    from . import lstm  # noqa: F401  (cần PyTorch)
+    from . import lstm, tft  # noqa: F401  (cần PyTorch)
 except ImportError:
     pass
 

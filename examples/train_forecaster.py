@@ -39,6 +39,7 @@ ALGOS = {  # one-line description of each algorithm for --help
     "lstm_snd": "LSTM, single value, trained on SNDZoo only (Step 0 reference)",
     "lstm_point": "LSTM, single value, trained on every dataset (Step 1)",
     "lstm_q": "LSTM, P10/P50/P90, no calendar/series ID (Step 2)",
+    "tft": "Temporal Fusion Transformer, P10/P50/P90 + calendar + series/dataset ID (Step 4)",
     "oracle": "sees the future = upper bound, for reference only, not a real result",
 }
 EPILOG = "Available algorithms:\n" + "\n".join(
