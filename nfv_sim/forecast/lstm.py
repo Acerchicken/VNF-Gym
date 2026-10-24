@@ -13,7 +13,7 @@ import numpy as np
 import torch
 from torch import nn
 
-from .base import Forecaster, make_targets, make_windows, register_forecaster
+from .base import Forecaster, as_series_list, make_training_set, register_forecaster
 
 
 class _LSTMNet(nn.Module):
@@ -41,12 +41,10 @@ class LSTMForecaster(Forecaster):
         self.net: Optional[_LSTMNet] = None
         self.history: list = []                 # (epoch, train_loss, val_loss)
 
-    # ---- dữ liệu: (T, n) -> X (N*n, L), Y (N*n, H) ----
-    def _xy(self, load):
-        t = np.arange(self.context_len - 1, len(load) - self.horizon)
-        X = make_windows(load, t, self.context_len).transpose(0, 2, 1).reshape(-1, self.context_len)
-        Y = make_targets(load, t, self.horizon).transpose(0, 2, 1).reshape(-1, self.horizon)
-        return torch.as_tensor(X, dtype=torch.float32), torch.as_tensor(Y, dtype=torch.float32)
+    # ---- dữ liệu: list[TimeSeries] -> X (M, L), Y (M, H), mỗi cột của mỗi chuỗi là một mẫu ----
+    def _xy(self, series):
+        d = make_training_set(series, self.context_len, self.horizon)
+        return torch.as_tensor(d["x"]), torch.as_tensor(d["y"])
 
     def _loss(self, pred, y):
         w = torch.where(pred < y, self.under_weight, 1.0)    # dự báo thiếu -> phạt nặng hơn
@@ -57,8 +55,9 @@ class LSTMForecaster(Forecaster):
         g = torch.Generator().manual_seed(self.seed)
         self.net = _LSTMNet(self.horizon, self.hidden_size, self.num_layers, self.dropout)
         opt = torch.optim.Adam(self.net.parameters(), lr=self.lr)
-        X, Y = self._xy(train)
-        Xv, Yv = self._xy(val) if val is not None and len(val) > self.context_len + self.horizon else (None, None)
+        X, Y = self._xy(as_series_list(train))
+        val = [v for v in as_series_list(val) if len(v) > self.context_len + self.horizon]
+        Xv, Yv = self._xy(val) if val else (None, None)
 
         best, best_state, bad = float("inf"), None, 0
         self.history = []

@@ -5,7 +5,7 @@ from typing import Optional
 
 import numpy as np
 
-from .base import Forecaster, make_targets, make_windows, register_forecaster
+from .base import Forecaster, as_series_list, make_targets, make_training_set, register_forecaster
 
 
 @register_forecaster("naive")
@@ -51,9 +51,8 @@ class LinearForecaster(Forecaster):
         return windows.transpose(0, 2, 1).reshape(-1, windows.shape[1])
 
     def fit(self, train, val=None):
-        t = np.arange(self.context_len - 1, len(train) - self.horizon)
-        X = self._flat(make_windows(train, t, self.context_len)).astype(np.float64)
-        Y = self._flat(make_targets(train, t, self.horizon)).astype(np.float64)
+        d = make_training_set(as_series_list(train), self.context_len, self.horizon)
+        X, Y = d["x"].astype(np.float64), d["y"].astype(np.float64)
         X = np.hstack([X, np.ones((len(X), 1))])
         A = X.T @ X + self.ridge * np.eye(X.shape[1])
         self.W = np.linalg.solve(A, X.T @ Y)

@@ -10,6 +10,9 @@ Cấu trúc thư mục mong đợi (đúng như bộ dữ liệu gốc):
 
 Mỗi CSV có cột: <timestamp>, value_3, item_id. Giá trị đã chuẩn hoá min-max về [0, 1]
 (riêng CPU là tỉ lệ sử dụng so với quota 1 core, có thể > 1 một chút).
+
+Ngoài SNDZoo, `load_catalog` đọc các dataset bổ sung (NAB, Google, Alibaba, Azure) khai báo trong
+config.DATASETS thành danh sách `TimeSeries` để train forecaster trên nhiều loại tải.
 """
 from __future__ import annotations
 
@@ -20,7 +23,7 @@ from typing import Dict, List, Optional, Sequence
 import numpy as np
 import pandas as pd
 
-from .config import MAX_GAP_MINUTES, METRIC_FILES, SPLIT_DIRS, TRAIN_FRAC, VNF_NAMES
+from .config import DATASETS, MAX_GAP_MINUTES, METRIC_FILES, SPLIT_DIRS, TRAIN_FRAC, VNF_NAMES
 
 
 def _read_series(path: str) -> pd.Series:
@@ -44,18 +47,96 @@ def _find_split_dir(root: str, vnf: str, split: str) -> str:
 
 
 @dataclass
+class SeriesContext:
+    """Thông tin mô tả các cột của một mảng tải (T, n) — forecaster dùng làm "thông tin phụ".
+
+    names    : tên duy nhất của từng cột, dạng "<dataset>/<chuỗi>" (vd "sndzoo/WEB")
+    datasets : dataset của từng cột
+    start    : thời điểm của bước 0; None = không biết giờ
+    step_minutes : độ dài một bước (phút)
+    calendar : False nếu mốc thời gian là giả định -> không được dùng giờ/thứ làm feature
+    """
+
+    names: List[str]
+    datasets: List[str]
+    start: Optional[pd.Timestamp] = None
+    step_minutes: int = 1
+    calendar: bool = True
+
+    @property
+    def n(self) -> int:
+        return len(self.names)
+
+    def shifted(self, steps: int) -> "SeriesContext":
+        """Context của phần chuỗi bắt đầu từ bước `steps` (dùng khi cắt train/val)."""
+        start = None if self.start is None else self.start + pd.Timedelta(minutes=steps * self.step_minutes)
+        return SeriesContext(list(self.names), list(self.datasets), start, self.step_minutes, self.calendar)
+
+
+@dataclass
+class TimeSeries:
+    """Một mảng tải (T, n) kèm context — đơn vị dữ liệu forecaster nhận khi train/đánh giá."""
+
+    values: np.ndarray
+    ctx: SeriesContext
+
+    def __len__(self) -> int:
+        return len(self.values)
+
+    def split(self, cut: int):
+        """Cắt theo thời gian tại bước `cut`: (đầu, cuối)."""
+        return (TimeSeries(self.values[:cut], self.ctx),
+                TimeSeries(self.values[cut:], self.ctx.shifted(cut)))
+
+
+def as_timeseries(load: np.ndarray, ctx: Optional[SeriesContext] = None) -> TimeSeries:
+    """Mảng (T, n) không kèm thông tin -> TimeSeries với tên "col<j>", không có giờ."""
+    load = np.asarray(load, np.float32)
+    if load.ndim == 1:
+        load = load[:, None]
+    if ctx is None:
+        n = load.shape[1]
+        ctx = SeriesContext([f"col{j}" for j in range(n)], ["unknown"] * n, None, 1, False)
+    return TimeSeries(load, ctx)
+
+
+@dataclass
 class TraceSet:
     """Chuỗi thời gian đã căn chỉnh theo phút cho nhiều VNF.
 
     values[metric] có shape (T, n_vnf). index là timestamp chung.
+    dataset/calendar: tên dataset (key của config.DATASETS) và giờ có phải giờ thật không.
     """
 
     vnfs: List[str]
     index: pd.DatetimeIndex
     values: Dict[str, np.ndarray] = field(default_factory=dict)
+    dataset: str = "sndzoo"
+    calendar: bool = True
 
     def __len__(self) -> int:
         return len(self.index)
+
+    @property
+    def step_minutes(self) -> int:
+        if len(self.index) < 2:
+            return 1
+        return max(1, int(round((self.index[1] - self.index[0]).total_seconds() / 60)))
+
+    def slice(self, sl: slice) -> "TraceSet":
+        return TraceSet(self.vnfs, self.index[sl], {m: a[sl] for m, a in self.values.items()},
+                        self.dataset, self.calendar)
+
+    def subsample(self, k: int) -> "TraceSet":
+        """Lấy 1 mẫu mỗi k bước (dữ liệu gốc k phút đã bị nội suy lên lưới 1 phút -> lấy lại đúng mẫu thật)."""
+        return self if k <= 1 else self.slice(slice(None, None, k))
+
+    def context(self) -> SeriesContext:
+        return SeriesContext([f"{self.dataset}/{v}" for v in self.vnfs], [self.dataset] * len(self.vnfs),
+                             self.index[0] if len(self.index) else None, self.step_minutes, self.calendar)
+
+    def series(self, metric: str = "rx") -> TimeSeries:
+        return TimeSeries(self.values[metric], self.context())
 
     @property
     def minute_of_day(self) -> np.ndarray:
@@ -71,7 +152,7 @@ class TraceSet:
         for m, arr in self.values.items():
             a = arr[: n * step_minutes].reshape(n, step_minutes, -1)
             out[m] = a.mean(axis=1) if m == "mem" else a.max(axis=1)
-        return TraceSet(self.vnfs, self.index[: n * step_minutes : step_minutes], out)
+        return TraceSet(self.vnfs, self.index[: n * step_minutes : step_minutes], out, self.dataset, self.calendar)
 
 
 def load_sndzoo(
@@ -94,10 +175,45 @@ def load_sndzoo(
         return _load_folder(root, split, vnfs, metrics, max_gap_minutes)
     if not 0.0 < train_frac < 1.0:
         raise ValueError(f"TRAIN_FRAC phải trong (0, 1) hoặc None, nhận {train_frac}")
-    full = _load_folder(root, "train", vnfs, metrics, max_gap_minutes)
+    return _time_split(_load_folder(root, "train", vnfs, metrics, max_gap_minutes), split, train_frac)
+
+
+def _time_split(full: TraceSet, split: str, train_frac: float) -> TraceSet:
+    """train = train_frac đầu chuỗi, test = phần còn lại (không xáo trộn)."""
     cut = int(len(full) * train_frac)
-    sl = slice(0, cut) if split == "train" else slice(cut, None)
-    return TraceSet(full.vnfs, full.index[sl], {m: a[sl] for m, a in full.values.items()})
+    return full.slice(slice(0, cut) if split == "train" else slice(cut, None))
+
+
+def load_dataset(name: str, split: str = "train", metrics: Sequence[str] = ("rx",),
+                 train_frac: Optional[float] = TRAIN_FRAC) -> List[TraceSet]:
+    """Đọc một dataset trong config.DATASETS -> danh sách TraceSet (đã về đúng bước gốc của dữ liệu).
+
+    joint=True: một TraceSet chứa mọi chuỗi (cắt về khoảng thời gian chung, như env đọc SNDZoo).
+    joint=False: mỗi chuỗi một TraceSet (các chuỗi NAB, Google... nằm ở các khoảng thời gian khác nhau).
+    """
+    if name not in DATASETS:
+        raise KeyError(f"Không có dataset '{name}' trong config.DATASETS. Có: {sorted(DATASETS)}")
+    cfg = DATASETS[name]
+    groups = [list(cfg["series"])] if cfg["joint"] else [[v] for v in cfg["series"]]
+    out = []
+    for vnfs in groups:
+        if name == "sndzoo":
+            ts = load_sndzoo(cfg["root"], split, vnfs, metrics, train_frac=train_frac)
+        else:
+            if train_frac is None:
+                raise ValueError(f"Dataset '{name}' chỉ chia được theo TRAIN_FRAC (không có thư mục test riêng)")
+            # cho phép nội suy lỗ dài tới 3 mẫu gốc; lấy lại mẫu thật TRƯỚC khi cắt train/test
+            full = _load_folder(cfg["root"], "train", vnfs, metrics, max(MAX_GAP_MINUTES, 3 * cfg["step"]))
+            ts = _time_split(full.subsample(cfg["step"]), split, train_frac)
+        ts.dataset, ts.calendar = name, cfg["calendar"]
+        out.append(ts)
+    return out
+
+
+def load_catalog(names: Sequence[str], split: str = "train", metric: str = "rx",
+                 train_frac: Optional[float] = TRAIN_FRAC) -> List[TimeSeries]:
+    """Đọc nhiều dataset -> danh sách TimeSeries (tải `metric` + context) để train/đánh giá forecaster."""
+    return [ts.series(metric) for name in names for ts in load_dataset(name, split, (metric,), train_frac)]
 
 
 def _load_folder(

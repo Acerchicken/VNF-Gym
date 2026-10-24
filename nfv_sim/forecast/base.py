@@ -12,6 +12,7 @@ Thêm một thuật toán mới (Lag-Llama, TimesFM, GRU, Prophet...) chỉ cầ
             self.my_param = my_param
 
         def fit(self, train, val=None):         # tuỳ chọn — model zero-shot thì bỏ qua
+            series = as_series_list(train)      # list[TimeSeries], mỗi cái values (T, n)
             ...
             return self
 
@@ -22,16 +23,22 @@ rồi thêm `"my_model": dict(my_param=...)` vào FORECASTERS trong config.py. S
 script (train_forecaster, run_baselines, train_ppo) dùng được qua `--forecaster my_model`.
 
 Quy ước dữ liệu: tải đã chuẩn hoá (giống `env._load`), mảng (T, n_vnf), float32.
+`fit` nhận một mảng (T, n), một `TimeSeries` hoặc danh sách `TimeSeries` (nhiều dataset, xem data.load_catalog);
+dùng `as_series_list` để đưa về danh sách.
+
+Một key trong FORECASTERS có thể là biến thể của model khác (`model="lstm"`, vd "lstm_snd"):
+make_forecaster tạo đúng class đó, đặt tên instance = key để lưu thành <key>.pkl.
 """
 from __future__ import annotations
 
 import os
 import pickle
-from typing import Callable, Dict, Optional, Type
+from typing import Callable, Dict, List, Optional, Sequence, Type
 
 import numpy as np
 
 from ..config import FORECAST, FORECASTERS
+from ..data import TimeSeries, as_timeseries
 
 # ----------------------------------------------------------------------------- registry
 _REGISTRY: Dict[str, Type["Forecaster"]] = {}
@@ -50,18 +57,27 @@ def register_forecaster(name: str) -> Callable:
     return deco
 
 
+def _model_of(name: str) -> str:
+    """Tên class đã đăng ký mà key `name` dùng (biến thể trong FORECASTERS có model=...)."""
+    return FORECASTERS.get(name, {}).get("model", name)
+
+
 def available_forecasters() -> list:
-    return sorted(_REGISTRY)
+    """Tên đã đăng ký + các biến thể trong FORECASTERS (bỏ biến thể của model chưa cài, vd thiếu PyTorch)."""
+    return sorted(set(_REGISTRY) | {k for k in FORECASTERS if _model_of(k) in _REGISTRY})
 
 
 def make_forecaster(name: str, **overrides) -> "Forecaster":
     """Tạo forecaster theo tên, tham số = FORECAST (chung) + FORECASTERS[name] + overrides."""
-    if name not in _REGISTRY:
+    model = _model_of(name)
+    if model not in _REGISTRY:
         raise KeyError(f"Không có forecaster '{name}'. Có: {available_forecasters()}")
     kw = dict(horizon=FORECAST["horizon"], context_len=FORECAST["context_len"])
-    kw.update(FORECASTERS.get(name, {}))
+    kw.update({k: v for k, v in FORECASTERS.get(name, {}).items() if k != "model"})
     kw.update(overrides)
-    return _REGISTRY[name](**kw)
+    fc = _REGISTRY[model](**kw)
+    fc.name = name                       # biến thể lưu/nạp theo tên riêng
+    return fc
 
 
 def model_path(name: str, models_dir: Optional[str] = None) -> str:
@@ -75,7 +91,7 @@ def load_forecaster(name_or_path: str, models_dir: Optional[str] = None) -> "For
     if os.path.isfile(path):
         with open(path, "rb") as f:   # chỉ nạp file do chính dự án tạo ra (pickle)
             return pickle.load(f)
-    if name_or_path in _REGISTRY and not _REGISTRY[name_or_path].needs_fit:
+    if _model_of(name_or_path) in _REGISTRY and not _REGISTRY[_model_of(name_or_path)].needs_fit:
         return make_forecaster(name_or_path)
     raise FileNotFoundError(f"Chưa có model '{name_or_path}' ({path}). "
                             f"Chạy: python examples\\train_forecaster.py --models {name_or_path}")
@@ -97,11 +113,61 @@ def make_targets(load: np.ndarray, t_idx: np.ndarray, horizon: int) -> np.ndarra
     return load[np.clip(idx, 0, len(load) - 1)]
 
 
-def split_train_val(load: np.ndarray, val_frac: float = FORECAST["val_frac"]):
-    n_val = int(len(load) * val_frac)
-    if n_val <= 0:
-        return load, None
-    return load[:-n_val], load[-n_val:]
+def as_series_list(data) -> List[TimeSeries]:
+    """Mảng (T, n) | TimeSeries | list[TimeSeries] | None -> list[TimeSeries]."""
+    if data is None:
+        return []
+    if isinstance(data, TimeSeries):
+        return [data]
+    if isinstance(data, (list, tuple)):
+        return [d if isinstance(d, TimeSeries) else as_timeseries(d) for d in data]
+    return [as_timeseries(data)]
+
+
+def split_train_val(load, val_frac: float = FORECAST["val_frac"]):
+    """Phần cuối mỗi chuỗi làm validation. Nhận mảng (T, n) (trả về 2 mảng như trước)
+    hoặc TimeSeries / danh sách TimeSeries (trả về 2 danh sách, cắt trong từng chuỗi)."""
+    if isinstance(load, np.ndarray):
+        n_val = int(len(load) * val_frac)
+        if n_val <= 0:
+            return load, None
+        return load[:-n_val], load[-n_val:]
+    tr, va = [], []
+    for ts in as_series_list(load):
+        n_val = int(len(ts) * val_frac)
+        a, b = ts.split(len(ts) - n_val)
+        tr.append(a)
+        if n_val > 0:
+            va.append(b)
+    return tr, va
+
+
+def make_training_set(series: Sequence[TimeSeries], context_len: int, horizon: int, stride: int = 1) -> Dict:
+    """Cắt mọi chuỗi (mọi cột) thành cặp (lịch sử L bước, tương lai H bước), mỗi cột là một mẫu đơn biến.
+
+    Trả về dict:
+        x    : (M, L)  lịch sử
+        y    : (M, H)  giá trị thật t+1..t+H
+        name : (M,)    tên chuỗi của từng mẫu (vd "sndzoo/WEB")
+        dataset : (M,) tên dataset
+    Chuỗi ngắn hơn L + H bị bỏ qua.
+    """
+    xs, ys, names, dsets = [], [], [], []
+    for ts in series:
+        t = np.arange(context_len - 1, len(ts) - horizon, max(1, int(stride)))
+        if len(t) == 0:
+            continue
+        w = make_windows(ts.values, t, context_len)          # (N, L, n)
+        y = make_targets(ts.values, t, horizon)              # (N, H, n)
+        for j in range(ts.values.shape[1]):
+            xs.append(w[:, :, j])
+            ys.append(y[:, :, j])
+            names += [ts.ctx.names[j]] * len(t)
+            dsets += [ts.ctx.datasets[j]] * len(t)
+    if not xs:
+        raise ValueError(f"Không chuỗi nào dài hơn L + H = {context_len + horizon} bước")
+    return dict(x=np.concatenate(xs).astype(np.float32), y=np.concatenate(ys).astype(np.float32),
+                name=np.array(names), dataset=np.array(dsets))
 
 
 # ----------------------------------------------------------------------------- lớp cơ sở
@@ -119,14 +185,16 @@ class Forecaster:
     _CHUNK = 256              # số bước dự báo cùng lúc khi gọi trong env (tăng tốc)
     _MAX_SERIES = 32          # số chuỗi tải giữ cache cùng lúc (nhiều env dùng chung 1 forecaster)
 
-    def __init__(self, horizon: int = FORECAST["horizon"], context_len: int = FORECAST["context_len"]):
+    def __init__(self, horizon: int = FORECAST["horizon"], context_len: int = FORECAST["context_len"],
+                 train_datasets: Sequence[str] = FORECAST["train_datasets"]):
         self.horizon = int(horizon)
         self.context_len = int(context_len)
+        self.train_datasets = tuple(train_datasets)   # dataset script train dùng cho model này
         self._cache: Dict[int, tuple] = {}     # id(load) -> (load, {khối: dự báo})
 
     # ---- lớp con cài đặt ----
-    def fit(self, train: np.ndarray, val: Optional[np.ndarray] = None) -> "Forecaster":
-        """train/val: (T, n_vnf). Mặc định không làm gì (model không cần train)."""
+    def fit(self, train, val=None) -> "Forecaster":
+        """train/val: mảng (T, n), TimeSeries hoặc list[TimeSeries]. Mặc định không làm gì."""
         return self
 
     def predict_batch(self, windows: np.ndarray) -> np.ndarray:

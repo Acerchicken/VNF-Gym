@@ -6,6 +6,10 @@
     python examples\\train_forecaster.py --models naive --plot naive lstm  (re-plot only, reuse the trained lstm.pkl)
     python examples\\train_forecaster.py --models naive --range 0 30  (plot only the first 30% of the test set)
 
+Each model is trained on the datasets in its `train_datasets` (default FORECAST["train_datasets"], see DATASETS
+in configs/config.py) and evaluated on the test part of SNDZoo (main table + plots) and of every dataset in
+FORECAST["eval_datasets"] (forecast_metrics_by_dataset.csv).
+
 Run with --help for the full list of options. Parameters come from configs/config.py (FORECAST, FORECASTERS).
 Trained models are saved to results/forecasters/<name>.pkl so train_ppo.py / run_baselines.py can use them
 via --forecaster <name>.
@@ -22,14 +26,17 @@ if hasattr(sys.stdout, "reconfigure"):  # Windows console (cp1252) cannot print 
 import pandas as pd
 
 from nfv_sim import SimConfig, load_sndzoo
-from nfv_sim.config import DATA_ROOT, FORECAST
-from nfv_sim.forecast import available_forecasters, evaluate_forecaster, make_forecaster, split_train_val
+from nfv_sim.config import DATA_ROOT, DATASETS, FORECAST
+from nfv_sim.data import load_catalog
+from nfv_sim.forecast import (available_forecasters, evaluate_by_dataset, evaluate_forecaster, make_forecaster,
+                              split_train_val)
 
 ALGOS = {  # one-line description of each algorithm for --help
     "naive": "repeat the last observed value (simplest baseline)",
     "moving_avg": "mean of the most recent steps",
     "linear": "linear autoregression (AR) with ridge regularization",
     "lstm": "LSTM neural network (requires PyTorch)",
+    "lstm_snd": "LSTM trained on SNDZoo only (Step 0 reference)",
     "oracle": "sees the future = upper bound, for reference only, not a real result",
 }
 EPILOG = "Available algorithms:\n" + "\n".join(
@@ -45,7 +52,8 @@ Examples:
 
 Outputs (in --out):
   <name>.pkl                      trained model
-  forecast_metrics.csv            error metrics on the test set
+  forecast_metrics.csv            error metrics on the SNDZoo test set
+  forecast_metrics_by_dataset.csv error metrics on the test part of every dataset in FORECAST["eval_datasets"]
   forecast_test_<VNF>.png         forecast plot per VNF (WEB, IOT, SEC)
   forecast_test_<VNF>_A-Bpct.png  plot when --range A B is used
 """
@@ -58,6 +66,8 @@ p.add_argument("--data", default=DATA_ROOT, metavar="DIR",
 p.add_argument("--models", nargs="+", default=available_forecasters(), choices=available_forecasters(),
                metavar="NAME", help="algorithms to train + evaluate, separated by spaces "
                                     "(default: all). Choices: %(choices)s")
+p.add_argument("--datasets", nargs="+", default=None, choices=sorted(DATASETS), metavar="NAME",
+               help="train every model on these datasets instead of its own train_datasets. Choices: %(choices)s")
 p.add_argument("--out", default=FORECAST["models_dir"], metavar="DIR",
                help="where models, metrics and plots are saved (default: %(default)s)")
 p.add_argument("--plot", nargs="+", default=FORECAST["plot"], choices=available_forecasters(), metavar="NAME",
@@ -70,30 +80,51 @@ args = p.parse_args()
 os.makedirs(args.out, exist_ok=True)
 
 metric = SimConfig().load_metric          # same load series the simulator uses
-train = load_sndzoo(args.data, "train")
 test = load_sndzoo(args.data, "test")
-tr, va = split_train_val(train.values[metric])
-te = test.values[metric]
-print(f"metric={metric} | train {len(tr)} / val {0 if va is None else len(va)} / test {len(te)} steps | "
-      f"H={FORECAST['horizon']} L={FORECAST['context_len']}")
+te = test.series(metric)                  # SNDZoo test: main table + plots (same series the env uses)
+te_all = load_catalog(FORECAST["eval_datasets"], "test", metric)
+print(f"metric={metric} | SNDZoo test {len(te)} steps | H={FORECAST['horizon']} L={FORECAST['context_len']}")
 
-rows = {}
+_train_cache = {}
+
+
+def train_data(names):
+    """(train, val) lists for a tuple of dataset names, loaded once per tuple."""
+    names = tuple(names)
+    if names not in _train_cache:
+        tr, va = split_train_val(load_catalog(names, "train", metric))
+        _train_cache[names] = (tr, va)
+        n_tr, n_va = sum(len(s) * s.values.shape[1] for s in tr), sum(len(s) * s.values.shape[1] for s in va)
+        print(f"  train data {names}: {sum(s.values.shape[1] for s in tr)} series, train {n_tr} / val {n_va} steps")
+    return _train_cache[names]
+
+
+rows, rows_ds = {}, {}
 for name in args.models:
     print(f"\n=== {name} ===")
     fc = make_forecaster(name)
     t0 = time.time()
-    fc.fit(tr, va)
+    if fc.needs_fit:
+        fc.fit(*train_data(args.datasets or fc.train_datasets))
     fit_s = time.time() - t0
     if fc.needs_fit:
         print(f"  saved {fc.save(os.path.join(args.out, f'{name}.pkl'))}")
     rows[name] = dict(evaluate_forecaster(fc, te, vnfs=test.vnfs), fit_s=round(fit_s, 1))
+    for ds, m in evaluate_by_dataset(fc, te_all).items():
+        rows_ds[(name, ds)] = m
 
 df = pd.DataFrame(rows).T.sort_values("mae")
 pd.set_option("display.width", 250)
 pd.set_option("display.max_columns", 30)
-print("\nResults on the test set (normalized load, oracle = upper bound):")
+print("\nResults on the SNDZoo test set (normalized load, oracle = upper bound):")
 print(df.round(4).to_string())
 df.to_csv(os.path.join(args.out, "forecast_metrics.csv"))
+df_ds = pd.DataFrame(rows_ds).T
+df_ds.index.names = ["model", "dataset"]
+print("\nMAE on the test part of each dataset:")
+print(df_ds["mae"].unstack("dataset").round(4).to_string())
+df_ds.to_csv(os.path.join(args.out, "forecast_metrics_by_dataset.csv"))
+te = te.values                            # plots below use the plain array
 
 try:
     import matplotlib.dates as mdates

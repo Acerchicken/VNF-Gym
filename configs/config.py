@@ -24,7 +24,9 @@ from typing import Dict, Optional, Sequence
 # =============================================================================
 # 1. ĐƯỜNG DẪN
 # =============================================================================
-DATA_ROOT = "E:/SNDZoo dataset/SNDZoo dataset/DatasetSNDZoo"   # thư mục DatasetSNDZoo
+# biến môi trường VNF_GYM_DATA_ROOT / VNF_GYM_EXTERNAL_ROOT (nếu có) ghi đè, tiện khi chạy trên máy khác
+DATA_ROOT = os.environ.get("VNF_GYM_DATA_ROOT", "E:/SNDZoo dataset/SNDZoo dataset/DatasetSNDZoo")   # thư mục DatasetSNDZoo
+EXTERNAL_ROOT = os.environ.get("VNF_GYM_EXTERNAL_ROOT", "E:/SNDZoo dataset/ExternalDatasets")    # dataset bổ sung (README bên trong)
 RESULTS_DIR = "results"                                       # nơi lưu csv, hình, model
 
 # =============================================================================
@@ -53,6 +55,32 @@ MAX_GAP_MINUTES = 5          # lỗ dữ liệu <= N phút thì nội suy, dài 
 #   None           : chia như SNDZoo gốc, train = TrainTest, test = ngày 18-02 (~94% / 6%).
 # Validation cho LSTM vẫn là FORECAST["val_frac"] cuối của phần train.
 TRAIN_FRAC = 0.7
+
+# Danh mục dataset cho forecaster (nfv_sim/data.py: load_catalog). Mỗi dataset:
+#   root     : thư mục chứa <tên chuỗi>/TrainTest/NoHoles/*.csv (cùng cấu trúc SNDZoo)
+#   series   : tên các chuỗi (thư mục con)
+#   step     : bước gốc của dữ liệu (phút). Dữ liệu 5 phút được lấy lại đúng các mẫu thật, không dùng phần nội suy.
+#   calendar : False nếu mốc thời gian là giả định -> không dùng giờ/thứ làm feature
+#   joint    : True = đọc các chuỗi cùng lúc, cắt về khoảng thời gian chung (như env đọc SNDZoo)
+# Mọi dataset chia train/test theo TRAIN_FRAC trong từng chuỗi. Riêng "sndzoo" đi qua load_sndzoo như env.
+# WorldCup98 có trong ExternalDatasets nhưng không dùng (dữ liệu 1998, quá cũ).
+_NAB = os.path.join(EXTERNAL_ROOT, "NAB_AWS", "processed")
+_GM = os.path.join(EXTERNAL_ROOT, "GoogleMachines2019", "processed")
+_DC = os.path.join(EXTERNAL_ROOT, "DatacenterTraces", "processed")
+DATASETS = {
+    "sndzoo": dict(root=DATA_ROOT, series=VNF_NAMES, step=1, calendar=True, joint=True),
+    "nab_aws": dict(root=_NAB, step=5, calendar=True, joint=False, series=(
+        "EC2_CPU_UTILIZATION_24AE8D", "EC2_CPU_UTILIZATION_53EA38", "EC2_CPU_UTILIZATION_5F5533",
+        "EC2_CPU_UTILIZATION_77C1CA", "EC2_CPU_UTILIZATION_825CC2", "EC2_CPU_UTILIZATION_AC20CD",
+        "EC2_CPU_UTILIZATION_C6585A", "EC2_CPU_UTILIZATION_FE7F93", "EC2_NETWORK_IN_257A54",
+        "EC2_NETWORK_IN_5ABAC7", "EC2_NETWORK_IN_A2EB1CD9", "ELB_REQUEST_COUNT_8C0756")),
+    "google_machines": dict(root=_GM, step=5, calendar=True, joint=False, series=(
+        "G19A_M12750464581", "G19A_M151929018", "G19A_M35971343254",
+        "G19A_M574702154", "G19A_M71877557146", "G19A_M72034114980")),
+    # tải gộp cả cluster: ngày bắt đầu là giả định -> calendar=False
+    "alibaba_cluster": dict(root=_DC, series=("ALIBABA2018",), step=1, calendar=False, joint=False),
+    "cluster_5min": dict(root=_DC, series=("GOOGLE2019", "AZURE2019"), step=5, calendar=False, joint=False),
+}
 
 
 # =============================================================================
@@ -193,6 +221,10 @@ FORECAST = dict(
     horizon=5,               # H: số bước dự báo (>= scale_out_delay để bù thời gian boot)
     context_len=30,          # L: số bước lịch sử đưa vào model
     val_frac=0.1,            # phần cuối tập train dùng làm validation (early stopping)
+    # dataset (key của DATASETS) dùng để train; từng model ghi đè được bằng train_datasets=... trong FORECASTERS
+    train_datasets=("sndzoo", "nab_aws", "google_machines", "alibaba_cluster", "cluster_5min"),
+    # dataset dùng để đánh giá (phần test của từng chuỗi); bảng chính vẫn là sndzoo
+    eval_datasets=("sndzoo", "nab_aws", "google_machines", "alibaba_cluster", "cluster_5min"),
     models_dir=os.path.join(RESULTS_DIR, "forecasters"),   # nơi lưu model đã train (<tên>.pkl)
     default="lstm",          # forecaster dùng khi script không chỉ định
     plot=["naive", "lstm"],  # forecasters drawn in forecast_test_<VNF>.png (actual line is always drawn)
@@ -202,6 +234,8 @@ FORECAST = dict(
 
 # Tham số riêng của từng thuật toán — key là tên đã đăng ký bằng @register_forecaster.
 # Thêm thuật toán mới: viết class trong nfv_sim/forecast/, đăng ký tên, rồi thêm một dòng ở đây.
+# Một key có thể là "biến thể" của model khác: model="lstm" + tham số riêng (dùng cho so sánh/ablation).
+# Model lưu ở results/forecasters/<key>.pkl.
 FORECASTERS = {
     "naive": dict(),                         # giữ nguyên giá trị cuối
     "moving_avg": dict(window=5),            # trung bình window bước gần nhất
@@ -217,5 +251,8 @@ FORECASTERS = {
         under_weight=1.0,    # >1: phạt dự báo THẤP hơn thực tế nặng hơn (thiếu tài nguyên -> vi phạm SLA)
         seed=0,
     ),
+    # LSTM cũ (Bước 0): chỉ train trên SNDZoo — mốc so sánh cho việc train trên nhiều dataset
+    "lstm_snd": dict(model="lstm", train_datasets=("sndzoo",), hidden_size=64, num_layers=2, dropout=0.1,
+                     epochs=30, batch_size=256, lr=1e-3, patience=5, under_weight=1.0, seed=0),
     "oracle": dict(),                        # tương lai thật — chỉ là cận trên, không báo cáo như kết quả thật
 }
