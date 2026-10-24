@@ -3,7 +3,8 @@
     python examples/run_baselines.py                          (tham số lấy từ configs/config.py)
     python examples/run_baselines.py --forecasters lstm linear
 
-Mỗi forecaster đã train (examples/train_forecaster.py) tạo thêm một policy "predictive(<tên>)".
+Mỗi forecaster đã train (examples/train_forecaster.py) tạo thêm một policy "predictive(<tên>)";
+model dự báo khoảng (lstm, tft) tạo thêm "predictive(<tên>,P90)" cấp tài nguyên theo P90 thay vì P50.
 """
 import argparse
 import os
@@ -45,6 +46,9 @@ for fname in args.forecasters:
         print(f"Bỏ qua predictive({fname}): {ex}")
         continue
     POLICIES[f"predictive({fname})"] = lambda e, fc=fc: PredictiveThresholdPolicy(e, forecast_fn=fc.demand_fn())
+    if 0.9 in fc.quantiles:
+        POLICIES[f"predictive({fname},P90)"] = lambda e, fc=fc: PredictiveThresholdPolicy(
+            e, forecast_fn=fc.demand_fn(quantile=0.9))
 
 rows, traces = {}, {}
 for sname, kw in SCENARIOS.items():

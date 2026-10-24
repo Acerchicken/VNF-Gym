@@ -89,6 +89,8 @@ class NFVScalingEnv(gym.Env):
                      cho các bước t_idx+1..t_idx+H. Mặc định (nếu horizon>0) dùng
                      dự báo "oracle" từ chính trace — chỉ để thử nghiệm cận trên.
                      Ở Bước 4, thay bằng Lag-Llama/TimesFM/LSTM.
+                     Khi cfg.forecast_quantiles khác (): gọi f(env, t_idx, quantiles=q) -> (H, n_vnf, len(q))
+                     (mọi nfv_sim.forecast.Forecaster đều hỗ trợ).
         """
         super().__init__()
         cfg = config or SimConfig()
@@ -136,7 +138,8 @@ class NFVScalingEnv(gym.Env):
             self.action_space = spaces.MultiDiscrete([self.n_act_per_vnf] * self.n_vnf)
 
         # ----- observation space -----
-        self.per_vnf_dim = cfg.history_len + cfg.forecast_horizon + 11
+        self.n_fc_q = max(1, len(cfg.forecast_quantiles))      # số giá trị dự báo mỗi bước
+        self.per_vnf_dim = cfg.history_len + cfg.forecast_horizon * self.n_fc_q + 11
         self.global_dim = 4
         dim = self.n_vnf * self.per_vnf_dim + self.global_dim
         self.observation_space = spaces.Box(0.0, np.inf, shape=(dim,), dtype=np.float32)
@@ -487,18 +490,20 @@ class NFVScalingEnv(gym.Env):
         parts = []
         fc = None
         if cfg.forecast_horizon > 0:
+            q = tuple(cfg.forecast_quantiles)
             if self.forecaster is not None:
-                fc = np.asarray(self.forecaster(self, tcur), np.float32).reshape(cfg.forecast_horizon, self.n_vnf)
-            else:  # oracle (cận trên) — chỉ dùng để thử nghiệm
+                out = self.forecaster(self, tcur, quantiles=q) if q else self.forecaster(self, tcur)
+                fc = np.asarray(out, np.float32).reshape(cfg.forecast_horizon, self.n_vnf, self.n_fc_q)
+            else:  # oracle (cận trên) — chỉ dùng để thử nghiệm; mọi quantile = tương lai thật
                 idx = np.clip(np.arange(tcur + 1, tcur + 1 + cfg.forecast_horizon), 0, len(self._load) - 1)
-                fc = self._load[idx]
+                fc = np.repeat(self._load[idx][..., None], self.n_fc_q, axis=-1)
         Mx = float(cfg.max_instances)
         Mv = float(cfg.max_instances * cfg.max_vcpu)
         W = float(max(cfg.osc_window, 1))
         for j in range(self.n_vnf):
             feats = list(hist[:, j])
             if fc is not None:
-                feats += list(fc[:, j])
+                feats += list(fc[:, j].T.reshape(-1))      # H giá trị của quantile 1, rồi quantile 2...
             n_run = self._count(j, RUN); n_boot = self._count(j, BOOT); n_mig = self._count(j, MIG)
             cap = sum(self._eff(i.size) * (1.0 if i.state == RUN else cfg.migration_capacity)
                       for i in self.insts if i.vnf == j and i.state != BOOT)

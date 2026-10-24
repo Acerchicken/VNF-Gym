@@ -8,10 +8,14 @@ Mẹo:
 * --forecaster lstm thêm dự báo của model đã train (examples/train_forecaster.py) vào state,
   horizon lấy từ FORECAST["horizon"]. Dùng tên bất kỳ đã đăng ký trong nfv_sim/forecast.
 * --forecast 5 không kèm --forecaster: dự báo oracle 5 bước (chỉ là cận trên).
+* --quantiles 0.5 0.9 (Bước 5): state gồm cả P50 và P90 của dự báo (model dự báo khoảng: lstm, tft).
+* Kết quả đánh giá lưu ở <out>/ppo_eval<tag>.csv để so sánh nhiều lần chạy.
 """
 import argparse
 import os
 import sys
+
+import pandas as pd
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 if hasattr(sys.stdout, "reconfigure"):  # console Windows (cp1252) không in được tiếng Việt
@@ -31,6 +35,8 @@ p.add_argument("--data", default=DATA_ROOT, help="thư mục DatasetSNDZoo (mặ
 p.add_argument("--steps", type=int, default=TRAIN["total_steps"])
 p.add_argument("--forecast", type=int, default=TRAIN["forecast_horizon"])
 p.add_argument("--forecaster", default=TRAIN["forecaster"], help="tên forecaster đã train (vd: lstm, linear)")
+p.add_argument("--quantiles", nargs="*", type=float, default=list(TRAIN["forecast_quantiles"]),
+               help="quantile của dự báo đưa vào state, vd 0.5 0.9 (mặc định: một giá trị)")
 p.add_argument("--n-envs", type=int, default=TRAIN["n_envs"])
 p.add_argument("--out", default=RESULTS_DIR)
 args = p.parse_args()
@@ -41,13 +47,15 @@ if args.forecaster:
     fc = load_forecaster(args.forecaster)
     args.forecast = args.forecast or FORECAST["horizon"]
     print(f"Forecaster: {fc} -> state gồm dự báo {args.forecast} bước")
-tag = f"_{args.forecaster}" if args.forecaster else ""
+q = tuple(args.quantiles)
+tag = (f"_{args.forecaster}" if args.forecaster else (f"_oracle{args.forecast}" if args.forecast else "")) + \
+      ("_q" + "-".join(f"{int(x * 100)}" for x in q) if q else "")
 
 train = load_sndzoo(args.data, "train")
 test = load_sndzoo(args.data, "test")
 
 train_kw = dict(traces=train, episode_steps=TRAIN["episode_steps"], random_start=True,
-                forecast_horizon=args.forecast, forecaster=fc, **TRAIN_AUGMENT)
+                forecast_horizon=args.forecast, forecast_quantiles=q, forecaster=fc, **TRAIN_AUGMENT)
 venv = make_vec_env(lambda: NFVScalingEnv(**train_kw), n_envs=args.n_envs, seed=TRAIN["seed"])
 venv = VecNormalize(venv, norm_obs=True, norm_reward=True, gamma=PPO_KW["gamma"])
 
@@ -66,9 +74,10 @@ def ppo_policy(obs):
     return a
 
 
+rows = {}
 for sname, kw in SCENARIOS.items():
     env = NFVScalingEnv(traces=test, episode_steps=None, random_start=False,
-                        forecast_horizon=args.forecast, forecaster=fc, **kw)
+                        forecast_horizon=args.forecast, forecast_quantiles=q, forecaster=fc, **kw)
     s_ppo, _ = run_episode(env, ppo_policy, seed=EVAL_SEED)
     env2 = NFVScalingEnv(traces=test, episode_steps=None, random_start=False,
                          forecast_horizon=args.forecast, **kw)
@@ -76,3 +85,5 @@ for sname, kw in SCENARIOS.items():
     print(f"\n=== {sname} ===")
     for k in s_ppo:
         print(f"{k:24s} PPO={s_ppo[k]!s:>10}   threshold={s_thr[k]!s:>10}")
+    rows[(sname, f"ppo{tag}")], rows[(sname, "threshold")] = s_ppo, s_thr
+pd.DataFrame(rows).T.to_csv(os.path.join(args.out, f"ppo_eval{tag}.csv"))

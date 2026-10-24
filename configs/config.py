@@ -159,6 +159,8 @@ class SimConfig:
     # ---- quan sát ----
     history_len: int = 6
     forecast_horizon: int = 0                # >0: thêm dự báo vào observation
+    # () = mỗi bước dự báo 1 giá trị (P50 nếu model dự báo khoảng); (0.5, 0.9) = thêm cả P50 và P90 vào observation
+    forecast_quantiles: tuple = ()
     discrete_action: bool = False
 
 
@@ -191,6 +193,7 @@ TRAIN = dict(
     episode_steps=720,       # độ dài 1 episode train (phút)
     forecast_horizon=0,      # >0: thêm dự báo vào state (mặc định oracle)
     forecaster=None,         # tên forecaster đã train (vd "lstm") -> dùng thay oracle, horizon = FORECAST["horizon"]
+    forecast_quantiles=(),   # vd (0.5, 0.9): state gồm P50 và P90 của dự báo (Bước 5)
     seed=0,
 )
 # augmentation khi train để agent quen với quá tải (test vẫn dùng trace gốc)

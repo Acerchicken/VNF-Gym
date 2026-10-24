@@ -17,6 +17,7 @@ env/
 # Kết quả train / dữ liệu sinh ra (có thể tái tạo)
 runs/
 logs/
+lightning_logs/
 tensorboard/
 wandb/
 *.zip
