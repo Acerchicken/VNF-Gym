@@ -1,10 +1,10 @@
-"""Train and compare load-forecasting algorithms (Step 4) on the 18-02 test day.
+"""Train and compare load-forecasting algorithms (Step 4) on the test set (split set by TRAIN_FRAC in configs/config.py).
 
     python examples\\train_forecaster.py                       (all registered forecasters)
     python examples\\train_forecaster.py --models lstm linear  (only some models)
     python examples\\train_forecaster.py --plot naive lstm linear  (choose plotted lines, default FORECAST["plot"])
     python examples\\train_forecaster.py --models naive --plot naive lstm  (re-plot only, reuse the trained lstm.pkl)
-    python examples\\train_forecaster.py --models naive --range 0 30  (plot only the first 30% of the test day)
+    python examples\\train_forecaster.py --models naive --range 0 30  (plot only the first 30% of the test set)
 
 Run with --help for the full list of options. Parameters come from configs/config.py (FORECAST, FORECASTERS).
 Trained models are saved to results/forecasters/<name>.pkl so train_ppo.py / run_baselines.py can use them
@@ -37,20 +37,20 @@ EPILOG = "Available algorithms:\n" + "\n".join(
 
 Examples:
   python examples\train_forecaster.py
-      train + evaluate every algorithm, plot actual + naive + lstm over the whole test day
+      train + evaluate every algorithm, plot actual + naive + lstm over the whole test set
   python examples\train_forecaster.py --models naive --plot naive lstm
       re-plot only (does not retrain LSTM, reuses the existing lstm.pkl)
   python examples\train_forecaster.py --models naive --plot naive lstm linear --range 0 30
-      add the linear line and plot only the first 30% of the test day so the time axis is easier to read
+      add the linear line and plot only the first 30% of the test set so the time axis is easier to read
 
 Outputs (in --out):
   <name>.pkl                      trained model
-  forecast_metrics.csv            error metrics on the test day
+  forecast_metrics.csv            error metrics on the test set
   forecast_test_<VNF>.png         forecast plot per VNF (WEB, IOT, SEC)
   forecast_test_<VNF>_A-Bpct.png  plot when --range A B is used
 """
 
-p = argparse.ArgumentParser(description="Train and compare load-forecasting algorithms on the test day, "
+p = argparse.ArgumentParser(description="Train and compare load-forecasting algorithms on the test set, "
                                         "saving one plot per VNF.",
                             epilog=EPILOG, formatter_class=argparse.RawDescriptionHelpFormatter)
 p.add_argument("--data", default=DATA_ROOT, metavar="DIR",
@@ -64,8 +64,8 @@ p.add_argument("--plot", nargs="+", default=FORECAST["plot"], choices=available_
                help="algorithms drawn on the plots; the actual line is always drawn (default: %(default)s). "
                     "Models not trained in this run are loaded from --out. Choices: %(choices)s")
 p.add_argument("--range", nargs=2, type=float, default=FORECAST["plot_range"], metavar=("START", "END"),
-               help="part of the test day to plot, in percent, 0 <= START < END <= 100 "
-                    "(default: %(default)s = whole day; e.g. 0 30 = first 30%%, 40 60 = middle part)")
+               help="part of the test set to plot, in percent, 0 <= START < END <= 100 "
+                    "(default: %(default)s = whole test set; e.g. 0 30 = first 30%%, 40 60 = middle part)")
 args = p.parse_args()
 os.makedirs(args.out, exist_ok=True)
 
@@ -91,7 +91,7 @@ for name in args.models:
 df = pd.DataFrame(rows).T.sort_values("mae")
 pd.set_option("display.width", 250)
 pd.set_option("display.max_columns", 30)
-print("\nResults on the test day (normalized load, oracle = upper bound):")
+print("\nResults on the test set (normalized load, oracle = upper bound):")
 print(df.round(4).to_string())
 df.to_csv(os.path.join(args.out, "forecast_metrics.csv"))
 
@@ -126,7 +126,7 @@ try:
         ax.xaxis.set_major_formatter(mdates.DateFormatter("%d/%m %H:%M"))
         ax.set_xlabel("time")
         ax.set_ylabel("load (normalized)")
-        ax.set_title(f"{v}: {k}-minute-ahead forecast on test day")
+        ax.set_title(f"{v}: {k}-minute-ahead forecast on test set")
         ax.legend(loc="upper left")
         ax.grid(alpha=0.3)
         fig.tight_layout()

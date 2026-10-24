@@ -20,7 +20,7 @@ from typing import Dict, List, Optional, Sequence
 import numpy as np
 import pandas as pd
 
-from .config import MAX_GAP_MINUTES, METRIC_FILES, SPLIT_DIRS, VNF_NAMES
+from .config import MAX_GAP_MINUTES, METRIC_FILES, SPLIT_DIRS, TRAIN_FRAC, VNF_NAMES
 
 
 def _read_series(path: str) -> pd.Series:
@@ -80,8 +80,34 @@ def load_sndzoo(
     vnfs: Sequence[str] = VNF_NAMES,
     metrics: Sequence[str] = ("cpu", "mem", "rx", "tx"),
     max_gap_minutes: int = MAX_GAP_MINUTES,
+    train_frac: Optional[float] = TRAIN_FRAC,
 ) -> TraceSet:
-    """Đọc và căn chỉnh dữ liệu.
+    """Đọc tập train hoặc test theo cách chia trong config (TRAIN_FRAC).
+
+    train_frac None: train = thư mục TrainTest, test = thư mục 18-02 (cách chia gốc của SNDZoo).
+    train_frac trong (0, 1): đọc thư mục TrainTest rồi chia theo thời gian (không xáo trộn),
+    train = train_frac đầu, test = phần còn lại.
+    """
+    if split not in ("train", "test"):
+        raise ValueError(f"split phải là 'train' hoặc 'test', nhận '{split}'")
+    if train_frac is None:
+        return _load_folder(root, split, vnfs, metrics, max_gap_minutes)
+    if not 0.0 < train_frac < 1.0:
+        raise ValueError(f"TRAIN_FRAC phải trong (0, 1) hoặc None, nhận {train_frac}")
+    full = _load_folder(root, "train", vnfs, metrics, max_gap_minutes)
+    cut = int(len(full) * train_frac)
+    sl = slice(0, cut) if split == "train" else slice(cut, None)
+    return TraceSet(full.vnfs, full.index[sl], {m: a[sl] for m, a in full.values.items()})
+
+
+def _load_folder(
+    root: str,
+    split: str,
+    vnfs: Sequence[str],
+    metrics: Sequence[str],
+    max_gap_minutes: int,
+) -> TraceSet:
+    """Đọc và căn chỉnh dữ liệu của một thư mục (SPLIT_DIRS[split]).
 
     root: đường dẫn tới thư mục DatasetSNDZoo
     split: "train" hoặc "test"

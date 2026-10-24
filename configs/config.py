@@ -47,6 +47,13 @@ SPLIT_DIRS = {
 
 MAX_GAP_MINUTES = 5          # lỗ dữ liệu <= N phút thì nội suy, dài hơn thì điền 0
 
+# Cách chia train/test (mọi script và env đều dùng qua load_sndzoo):
+#   số trong (0, 1): lấy dữ liệu thư mục TrainTest (27/01 -> 10/02, ~20.000 phút) và chia theo thời gian,
+#                    TRAIN_FRAC đầu làm train, phần còn lại làm test (vd 0.7 -> 70% train / 30% test).
+#   None           : chia như SNDZoo gốc, train = TrainTest, test = ngày 18-02 (~94% / 6%).
+# Validation cho LSTM vẫn là FORECAST["val_frac"] cuối của phần train.
+TRAIN_FRAC = 0.7
+
 
 # =============================================================================
 # 3. SIMULATOR (NFVScalingEnv)
