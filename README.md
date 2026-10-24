@@ -46,10 +46,13 @@ Outputs (`baselines.csv`, `capacity_*.png` plots, the PPO model) are written to 
 
 ## 2. How the data is used
 
-| Split | Folder | Length |
+The split is set by `TRAIN_FRAC` in `configs/config.py` (default 0.7): the `<VNF>/TrainTest/NoHoles/*.csv`
+folder (~20,000 minutes, 27/01 → 10/02/2025) is cut in time, the first 70% is train and the rest is test.
+
+| Split | `TRAIN_FRAC = 0.7` (default) | `TRAIN_FRAC = None` (original SNDZoo split) |
 |---|---|---|
-| train | `<VNF>/TrainTest/NoHoles/*.csv` | ~20,000 minutes (27/01 → 10/02/2025) |
-| test  | `<VNF>/18-02/CSVmergedFIXED/*.csv` | ~1,300 minutes (17/02 10:00 → 18/02 07:47) |
+| train | first 70% of TrainTest (~14,000 min, 27/01 → 06/02) | `<VNF>/TrainTest/NoHoles/*.csv` (~20,000 min) |
+| test  | last 30% of TrainTest (~6,000 min, 06/02 → 10/02) | `<VNF>/18-02/CSVmergedFIXED/*.csv` (~1,300 min) |
 
 * **Incoming load** (`load_metric="rx"`, the default) is `container_network_receive_bytes_total`, normalised to [0,1].
   It can be switched to `"cpu"`.
@@ -59,6 +62,26 @@ Outputs (`baselines.csv`, `capacity_*.png` plots, the PPO model) are written to 
 * **Memory working set** (`mem`) is used to compute **migration time and cost**.
   A VNF using more RAM takes longer and costs more to migrate (modelling pre-copy live migration).
 * The tx/cpu columns are loaded as well, so you can use them as features or change `load_metric`.
+
+### Additional datasets (used only to train the forecasters)
+
+`DATASETS` in `configs/config.py` lists extra load traces stored in the SNDZoo folder layout under
+`EXTERNAL_ROOT` (`E:/SNDZoo dataset/ExternalDatasets`, see the README there). `nfv_sim.data.load_catalog(names, split)`
+reads them as a list of `TimeSeries` (load array + `SeriesContext`: series name, dataset, start time, step, whether
+the clock is real). Every series is split in time with `TRAIN_FRAC`, like SNDZoo.
+
+| Key | Series | Step | Real clock? | Content |
+|---|---|---|---|---|
+| `sndzoo` | 3 (WEB, IOT, SEC) | 1 min | yes | incoming traffic of the three VNFs |
+| `nab_aws` | 12 | 5 min | yes | AWS CloudWatch CPU / network in / ELB requests (NAB) |
+| `google_machines` | 6 | 5 min | yes | CPU of single Google Borg machines, May 2019 |
+| `alibaba_cluster` | 1 | 1 min | no | Alibaba 2018 cluster-average CPU |
+| `cluster_5min` | 2 | 5 min | no | Google 2019 and Azure 2019 cluster-wide CPU |
+
+5-minute data is taken back to its real samples (the loader's 1-minute interpolation is dropped), so a 5-step
+forecast means 25 minutes there. "Real clock = no" means the start date is a placeholder, so the calendar features
+are switched off for those series. WorldCup98 is in the folder but deliberately not used (1998 data).
+The simulator itself still runs on SNDZoo only (it needs `peak_instances`, SLA and latency for each VNF).
 
 ## 3. System model
 
@@ -170,27 +193,39 @@ env = NFVScalingEnv(data_root=ROOT, split="test", episode_steps=None, random_sta
 **Train** with augmentation so the agent gets used to overload, then **test** on the original 18-02 trace plus a
 fixed overload scenario (same seed) for a fair comparison.
 
-## 6. Baseline results on the test day (trial run)
+## 6. Baseline results on the test set
+
+Test set = last 30% of SNDZoo (`TRAIN_FRAC = 0.7`), ~6,000 minutes. `python examples\run_baselines.py --forecasters lstm tft`.
 
 | Scenario | Policy | Utilization | Oscillation | Scaling actions | SLA violations | Avg vCPU |
 |---|---|---|---|---|---|---|
-| normal | static (provisioned for peak) | 0.20 | 0 | 17 | 0.2% | 20.0 |
-| normal | threshold (HPA 80%/40%) | 0.51 | 166 | 370 | 10.3% | 8.0 |
-| normal | vertical (VPA) | 0.51 | 160 | 348 | 8.8% | 8.0 |
-| normal | hybrid | 0.53 | 182 | 389 | 13.2% | 8.0 |
-| normal | predictive (oracle) | 0.51 | 238 | 496 | 5.6% | 7.8 |
-| overload | static | 0.32 | 0 | 17 | 6.9% | 20.0 |
-| overload | threshold | 0.55 | 192 | 490 | 15.1% | 11.6 |
-| overload | vertical | 0.56 | 183 | 458 | 13.2% | 11.8 |
-| overload | hybrid | 0.59 | 180 | 441 | 16.6% | 11.8 |
-| overload | predictive (oracle) | 0.55 | 254 | 700 | 8.4% | 11.5 |
+| normal | static (provisioned for peak) | 0.17 | 0 | 17 | 0.0% | 20.0 |
+| normal | threshold (HPA 80%/40%) | 0.48 | 757 | 1674 | 11.0% | 7.0 |
+| normal | vertical (VPA) | 0.49 | 695 | 1550 | 9.2% | 7.1 |
+| normal | hybrid | 0.50 | 701 | 1547 | 11.1% | 7.3 |
+| normal | predictive (oracle) | 0.48 | 966 | 2052 | 4.8% | 7.0 |
+| normal | predictive (lstm, P50) | 0.48 | 1415 | 2527 | 8.4% | 7.0 |
+| normal | predictive (lstm, P90) | 0.43 | 2026 | 2979 | 2.6% | 7.9 |
+| normal | predictive (tft, P50) | 0.48 | 1538 | 2665 | 9.4% | 7.0 |
+| normal | predictive (tft, P90) | 0.42 | 2103 | 3123 | 3.2% | 8.0 |
+| overload | static | 0.27 | 0 | 17 | 5.2% | 20.0 |
+| overload | threshold | 0.53 | 757 | 2005 | 13.3% | 10.1 |
+| overload | vertical | 0.54 | 709 | 1859 | 11.5% | 10.2 |
+| overload | hybrid | 0.56 | 733 | 1906 | 14.8% | 10.3 |
+| overload | predictive (oracle) | 0.53 | 1118 | 2901 | 7.3% | 10.2 |
+| overload | predictive (lstm, P50) | 0.55 | 1576 | 3467 | 14.8% | 9.8 |
+| overload | predictive (lstm, P90) | 0.52 | 1737 | 3529 | 9.7% | 10.4 |
+| overload | predictive (tft, P50) | 0.55 | 1666 | 3495 | 15.6% | 9.8 |
+| overload | predictive (tft, P90) | 0.51 | 1875 | 3547 | 9.8% | 10.4 |
 
-The table shows three things:
+The table shows four things:
 
-* Static has almost no SLA violations and no oscillation, but utilization is only 20–30%.
-* Threshold and vertical raise utilization to about 50%, but reverse direction constantly (about once every
-  8 minutes) and violate the SLA often because of boot latency.
+* Static has almost no SLA violations and no oscillation, but utilization is only 17–27%.
+* Threshold and vertical raise utilization to about 50%, but reverse direction constantly and violate the SLA
+  often because of boot latency.
 * Predictive (perfect forecast) reduces SLA violations, but **oscillates even more** because it tracks every load peak.
+* Provisioning on the **P90** of a range forecast instead of the median cuts SLA violations from 8.4% to 2.6%
+  (normal) — below the oracle — for about 13% more vCPU, but oscillates the most.
 
 An RL agent has to achieve high utilization, good SLA compliance and low oscillation at the same time. This is the
 gap the thesis targets.
@@ -198,13 +233,17 @@ gap the thesis targets.
 ## 7. Step 4 — load forecasting (`nfv_sim/forecast/`)
 
 ```
-python examples\train_forecaster.py                 # train + compare every registered forecaster
-python examples\run_baselines.py --forecasters lstm  # adds a "predictive(lstm)" policy
-python examples\train_ppo.py --forecaster lstm       # forecast goes into the RL state
+python examples\train_forecaster.py                      # train + compare every registered forecaster (~1.5 h on CPU)
+python examples\train_forecaster.py --models lstm tft    # only some models
+python examples\run_baselines.py --forecasters lstm tft  # adds "predictive(lstm)" and "predictive(lstm,P90)" policies
+python examples\train_ppo.py --forecaster lstm --quantiles 0.5 0.9   # P50 + P90 forecast in the RL state
+python examples\explain_tft.py                           # TFT variable importance + attention plots
+python examples\crosscheck_tft.py                        # one-off check against pytorch-forecasting
 ```
 
 Every algorithm is a subclass of `Forecaster` (`nfv_sim/forecast/base.py`) registered by name.
-Built-in: `naive`, `moving_avg`, `linear` (ridge AR), `lstm` (PyTorch), `oracle` (upper bound only).
+Built-in: `naive`, `moving_avg`, `linear` (ridge AR), `lstm` and `tft` (PyTorch, shared training code in
+`neural.py`), `oracle` (upper bound only).
 Common parameters (`horizon`, `context_len`) live in `FORECAST`, per-model ones in `FORECASTERS` (config.py).
 Trained models are pickled to `results/forecasters/<name>.pkl`.
 
@@ -232,15 +271,95 @@ Import the module in `nfv_sim/forecast/__init__.py` and add `"timesfm": dict(...
 All scripts then accept it by name, and `evaluate_forecaster` reports the same metrics
 (MAE/RMSE per horizon step, under-prediction rate, MAE at load peaks, MAE per VNF).
 
-First results on the test day (H=5, L=30, normalised load):
+### What changed in Steps 1–5 (TFT integration)
 
-| Forecaster | MAE | MAE t+1 | MAE t+5 | under-rate | peak MAE | predictive policy: oscillation / SLA viol. |
+| Step | What | Where |
+|---|---|---|
+| 1 | Train on several datasets (`train_datasets`, default all of `DATASETS`); evaluate per dataset | `data.load_catalog`, `base.make_training_set`, `metrics.evaluate_by_dataset` |
+| 2 | Range forecast P10/P50/P90 with quantile (pinball) loss | `neural.py`, `Forecaster.quantiles`, `predict_dist_batch` |
+| 3 | Extra inputs: calendar (hour/day of week as sin/cos) and series/dataset ID embeddings | `SeriesContext.calendar_features`, `base.make_extra`, `lstm.py` `use_context` |
+| 4 | Temporal Fusion Transformer written from scratch + one-off cross-check with pytorch-forecasting | `forecast/tft.py`, `examples/explain_tft.py`, `examples/crosscheck_tft.py` |
+| 5 | P50 + P90 in the PPO state, P90 provisioning in the predictive baseline | `SimConfig.forecast_quantiles`, `train_ppo.py --quantiles`, `demand_fn(quantile=0.9)` |
+
+`predict_batch(windows, extra=None)` still returns one value per step (the median for range models), so older code
+keeps working. `forecast_series(load, t, quantiles=(0.5, 0.9), ctx=...)` returns several quantiles; `ctx`
+(a `SeriesContext`) carries the clock and series name, the env passes it automatically.
+
+Variants in `FORECASTERS` (one key per row of the table below, `model="lstm"` reuses the LSTM class):
+`lstm_snd` (Step 0: single value, SNDZoo only) → `lstm_point` (Step 1: all datasets) → `lstm_q` (Step 2: range)
+→ `lstm` (Step 3: range + extra inputs) → `tft` (Step 4: same data and inputs as `lstm`).
+
+### Results on the SNDZoo test set (H=5, L=30, normalised load)
+
+| Forecaster | MAE | MAE t+1 | MAE t+5 | under-rate | peak MAE | pinball | P90 coverage | P90−P10 | train time |
+|---|---|---|---|---|---|---|---|---|---|
+| lstm (range + extra inputs) | **0.0389** | 0.0177 | **0.0593** | **11.5%** | **0.096** | **0.0123** | 87.6% | 0.121 | 10 min |
+| lstm_q (range) | 0.0395 | **0.0173** | 0.0608 | 11.7% | 0.104 | 0.0127 | 90.7% | 0.120 | 7 min |
+| tft | 0.0408 | 0.0206 | 0.0599 | 13.2% | 0.111 | 0.0131 | 91.5% | 0.131 | 63 min |
+| lstm_snd (old LSTM) | 0.0421 | 0.0202 | 0.0630 | 12.8% | 0.111 | – | – | – | 4 min |
+| lstm_point | 0.0484 | 0.0263 | 0.0678 | 13.3% | 0.109 | – | – | – | 5 min |
+| linear | 0.0582 | 0.0343 | 0.0740 | 16.6% | 0.160 | – | – | – | 2 s |
+| naive | 0.0645 | 0.0358 | 0.0832 | 18.0% | 0.169 | – | – | – | – |
+| moving_avg | 0.0735 | 0.0568 | 0.0856 | 19.7% | 0.193 | – | – | – | – |
+
+MAE of range models is measured on P50. Pinball = average quantile loss (lower is better). P90 coverage = share of
+true values below the P90 forecast (ideal 90%). Train time on a 4-core CPU.
+
+MAE on the test part of every dataset (`forecast_metrics_by_dataset.csv`):
+
+| Forecaster | sndzoo | nab_aws | google_machines | alibaba_cluster | cluster_5min |
+|---|---|---|---|---|---|
+| lstm | **0.0389** | 0.0344 | 0.0415 | 0.0529 | **0.0477** |
+| lstm_q | 0.0395 | **0.0293** | **0.0403** | 0.0547 | 0.0508 |
+| tft | 0.0408 | 0.0316 | 0.0412 | 0.0529 | 0.0499 |
+| lstm_snd | 0.0421 | 0.0696 | 0.0723 | 0.0697 | 0.0700 |
+| lstm_point | 0.0484 | 0.0362 | 0.0408 | 0.0554 | 0.0516 |
+| naive | 0.0645 | 0.0418 | 0.0452 | 0.0588 | 0.0533 |
+
+Reading the two tables:
+
+* Training a single-value LSTM on all datasets **without** telling it which series it sees (`lstm_point`) makes
+  SNDZoo worse (0.0484 vs 0.0421); the 5-minute cluster traces behave differently. The range loss (`lstm_q`) and
+  the series/dataset ID (`lstm`) bring it back and below the old LSTM, while one model now also covers every dataset.
+* TFT does not beat the LSTM here (0.0408 vs 0.0389 on SNDZoo; close on the other datasets). With a single load
+  input, 30 steps of history and 5 calendar features most of TFT's blocks have little to select from; it took
+  6× longer to train (best validation loss at epoch 34 of a 60-epoch budget). Its value for the thesis is the explanation below.
+* `tft_importance.png`: the past load gets 57–68% of the past-input weight; calendar features share the rest.
+  `tft_attention.png`: attention grows towards the most recent steps (the oldest step of the window also gets
+  extra weight); on SNDZoo and NAB the future steps also look at the known calendar of earlier future steps.
+
+TFT cross-check against pytorch-forecasting (same data, L, H, quantiles, hidden size 32, 4 heads, 30 epochs):
+| Dataset | MAE ours | MAE library | pinball ours | pinball library | P90 coverage ours | P90 coverage library |
 |---|---|---|---|---|---|---|
-| lstm | 0.044 | 0.021 | 0.066 | 14.0% | 0.106 | 368 / 9.3% |
-| linear | 0.057 | 0.029 | 0.077 | 17.4% | 0.139 | 422 / 12.7% |
-| naive | 0.071 | 0.041 | 0.090 | 19.9% | 0.160 | 395 / 20.0% |
-| moving_avg | 0.080 | 0.062 | 0.093 | 21.7% | 0.183 | – |
-| oracle | 0 | 0 | 0 | 0 | 0 | 238 / 5.6% |
+| sndzoo | 0.0408 | 0.0403 | 0.0131 | 0.0130 | 91.5% | 88.5% |
+| nab_aws | 0.0316 | 0.0295 | 0.0114 | 0.0107 | 89.5% | 86.5% |
+| google_machines | 0.0412 | 0.0399 | 0.0135 | 0.0130 | 88.3% | 88.2% |
+| alibaba_cluster | 0.0529 | 0.0534 | 0.0170 | 0.0172 | 88.5% | 88.2% |
+| cluster_5min | 0.0499 | 0.0496 | 0.0165 | 0.0164 | 86.5% | 86.6% |
+
+Both land within ~0.002 MAE of each other, so the self-written TFT has no large bug. The library model has
+103,569 parameters, ours 131,660. Rerun: `pip install pytorch-forecasting`, then `python examples\crosscheck_tft.py`
+(about 75 min on a 4-core CPU); the table is saved to `results/forecasters/crosscheck_tft.csv`.
+
+### PPO with forecasts in the state (Step 5)
+
+`python examples\train_ppo.py --forecaster lstm --quantiles 0.5 0.9` adds 5 P50 + 5 P90 values per VNF to the
+state (obs 85 dims instead of 55 + 15).
+How to run and compare (one configuration per line, repeat each with `--seed 0`, `--seed 1`, `--seed 2`):
+
+```bat
+python examples\train_ppo.py --seed 0                                         :: no forecast
+python examples\train_ppo.py --forecast 5 --seed 0                            :: oracle (upper bound)
+python examples\train_ppo.py --forecaster lstm --seed 0                       :: LSTM P50
+python examples\train_ppo.py --forecaster lstm --quantiles 0.5 0.9 --seed 0   :: LSTM P50 + P90
+python examples\train_ppo.py --forecaster tft --quantiles 0.5 0.9 --seed 0    :: TFT P50 + P90
+python examples\compare_ppo.py                                                :: mean ± std over seeds
+```
+
+Each run (300k steps) takes about 5 min with LSTM and 7 min with TFT on a 4-core CPU and writes `results/ppo_eval<tag>.csv`; `compare_ppo.py` groups
+the files by configuration (`_s1`, `_s2` are merged) and saves `results/ppo_compare.csv`. Compare first
+`sla_violation_rate` (lower is better), then `avg_vcpu` (cost), then `oscillations`. Differences smaller than the
+std over seeds are noise.
 
 If `forecast_horizon>0` and no forecaster is passed, the env uses an **oracle** (the true future values).
 The oracle is only for measuring an upper bound and must not be reported as a real result.
@@ -255,7 +374,8 @@ Everything is in one file, grouped as:
 * evaluation scenarios: `SCENARIOS`, `EVAL_SEED`;
 * baselines: `BASELINE`;
 * training: `TRAIN`, `TRAIN_AUGMENT`, `PPO`;
-* forecasting: `FORECAST`, `FORECASTERS`;
+* forecasting: `FORECAST` (horizon, context_len, quantiles, train/eval datasets), `FORECASTERS` (models and variants);
+* extra datasets: `EXTERNAL_ROOT`, `DATASETS` (`VNF_GYM_DATA_ROOT` / `VNF_GYM_EXTERNAL_ROOT` environment variables override the paths);
 * `play.py`: `PLAY`.
 
 To try a value without editing the file, override it when creating the env: `NFVScalingEnv(traces=..., w_osc=1.0)`.
@@ -265,6 +385,7 @@ Most-tuned `SimConfig` fields:
 | Group | Parameters |
 |---|---|
 | Time | `step_minutes` (aggregate k minutes per step, taking the max load within the step), `episode_steps` |
+| Forecast in state | `forecast_horizon`, `forecast_quantiles` (e.g. `(0.5, 0.9)`) |
 | Infrastructure | `n_nodes`, `node_slots`, `min_instances`, `max_instances` |
 | Delays | `scale_out_delay`, `vertical_delay`, `migration_base_delay`, `migration_mem_delay`, `migration_capacity` |
 | Vertical | `enable_vertical`, `max_vcpu`, `vertical_alpha` |

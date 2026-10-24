@@ -98,7 +98,7 @@ for ts in test:
         continue
     test_ds = TimeSeriesDataSet.from_dataset(train_ds, to_frame([ts]), stop_randomization=True, predict=False)
     out = model.predict(test_ds.to_dataloader(train=False, batch_size=4 * bs, num_workers=0),
-                        mode="quantiles", return_y=True)
+                        mode="quantiles", return_y=True, trainer_kwargs=dict(logger=False))
     dist, true = out.output.cpu().numpy(), out.y[0].cpu().numpy()          # (N, H, Q), (N, H)
     by.setdefault(ts.ctx.datasets[0], []).append((np.clip(dist, 0, None), true))
 for ds, v in by.items():

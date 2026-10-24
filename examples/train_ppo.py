@@ -38,6 +38,7 @@ p.add_argument("--forecaster", default=TRAIN["forecaster"], help="tên forecaste
 p.add_argument("--quantiles", nargs="*", type=float, default=list(TRAIN["forecast_quantiles"]),
                help="quantile của dự báo đưa vào state, vd 0.5 0.9 (mặc định: một giá trị)")
 p.add_argument("--n-envs", type=int, default=TRAIN["n_envs"])
+p.add_argument("--seed", type=int, default=TRAIN["seed"], help="seed của PPO (chạy vài seed để so sánh công bằng)")
 p.add_argument("--out", default=RESULTS_DIR)
 args = p.parse_args()
 os.makedirs(args.out, exist_ok=True)
@@ -49,17 +50,17 @@ if args.forecaster:
     print(f"Forecaster: {fc} -> state gồm dự báo {args.forecast} bước")
 q = tuple(args.quantiles)
 tag = (f"_{args.forecaster}" if args.forecaster else (f"_oracle{args.forecast}" if args.forecast else "")) + \
-      ("_q" + "-".join(f"{int(x * 100)}" for x in q) if q else "")
+      ("_q" + "-".join(f"{int(x * 100)}" for x in q) if q else "") + (f"_s{args.seed}" if args.seed != TRAIN["seed"] else "")
 
 train = load_sndzoo(args.data, "train")
 test = load_sndzoo(args.data, "test")
 
 train_kw = dict(traces=train, episode_steps=TRAIN["episode_steps"], random_start=True,
                 forecast_horizon=args.forecast, forecast_quantiles=q, forecaster=fc, **TRAIN_AUGMENT)
-venv = make_vec_env(lambda: NFVScalingEnv(**train_kw), n_envs=args.n_envs, seed=TRAIN["seed"])
+venv = make_vec_env(lambda: NFVScalingEnv(**train_kw), n_envs=args.n_envs, seed=args.seed)
 venv = VecNormalize(venv, norm_obs=True, norm_reward=True, gamma=PPO_KW["gamma"])
 
-model = PPO("MlpPolicy", venv, verbose=1, seed=TRAIN["seed"], **PPO_KW)
+model = PPO("MlpPolicy", venv, verbose=1, seed=args.seed, **PPO_KW)
 model.learn(total_timesteps=args.steps)
 model.save(os.path.join(args.out, f"ppo_nfv{tag}"))
 venv.save(os.path.join(args.out, f"vecnormalize{tag}.pkl"))
