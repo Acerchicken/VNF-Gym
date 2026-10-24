@@ -14,7 +14,7 @@ class NaiveForecaster(Forecaster):
 
     needs_fit = False
 
-    def predict_batch(self, windows):
+    def predict_batch(self, windows, extra=None):
         return np.repeat(windows[:, -1:, :], self.horizon, axis=1)
 
 
@@ -30,7 +30,7 @@ class MovingAverageForecaster(Forecaster):
         if self.window > self.context_len:
             raise ValueError("window phải <= context_len")
 
-    def predict_batch(self, windows):
+    def predict_batch(self, windows, extra=None):
         m = windows[:, -self.window:, :].mean(axis=1, keepdims=True)
         return np.repeat(m, self.horizon, axis=1)
 
@@ -58,7 +58,7 @@ class LinearForecaster(Forecaster):
         self.W = np.linalg.solve(A, X.T @ Y)
         return self
 
-    def predict_batch(self, windows):
+    def predict_batch(self, windows, extra=None):
         if self.W is None:
             raise RuntimeError("LinearForecaster chưa fit")
         N, L, n = windows.shape
@@ -73,9 +73,9 @@ class OracleForecaster(Forecaster):
 
     needs_fit = False
 
-    def forecast_series(self, load, t_idx, quantiles=None):
+    def forecast_series(self, load, t_idx, quantiles=None, ctx=None):
         out = make_targets(load, t_idx, self.horizon).astype(np.float32)
         return out if quantiles is None else np.repeat(out[..., None], len(quantiles), axis=-1)
 
-    def predict_batch(self, windows):
+    def predict_batch(self, windows, extra=None):
         raise RuntimeError("Oracle cần biết tương lai — dùng forecast_series/env, không dùng predict")

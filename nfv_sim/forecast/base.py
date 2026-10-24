@@ -16,10 +16,15 @@ Thêm một thuật toán mới (Lag-Llama, TimesFM, GRU, Prophet...) chỉ cầ
             ...
             return self
 
-        def predict_batch(self, windows):       # (N, L, n_vnf) -> (N, H, n_vnf)
+        def predict_batch(self, windows, extra=None):   # (N, L, n_vnf) -> (N, H, n_vnf)
             ...
 
 rồi thêm `"my_model": dict(my_param=...)` vào FORECASTERS trong config.py.
+
+`extra` (Bước 3) là thông tin phụ của các cửa sổ, None nếu không có (model đơn giản bỏ qua):
+    extra["cal"]      : (N, L + H, N_CALENDAR) feature lịch của L bước quá khứ + H bước tương lai
+    extra["names"]    : tên n cột (vd "sndzoo/WEB"), extra["datasets"]: dataset của n cột
+Tạo bằng `make_extra(ctx, t_idx, L, H)`; forecast_series/env/metrics tự truyền khi biết SeriesContext.
 
 Model dự báo khoảng (Bước 2) đặt `self.quantiles = (0.1, 0.5, 0.9)` và cài `predict_dist_batch`
 ((N, L, n) -> (N, H, n, Q)); `predict_batch` khi đó trả về trung vị P50. Ví dụ: nfv_sim/forecast/neural.py. Sau đó mọi
@@ -41,7 +46,7 @@ from typing import Callable, Dict, List, Optional, Sequence, Type
 import numpy as np
 
 from ..config import FORECAST, FORECASTERS
-from ..data import TimeSeries, as_timeseries
+from ..data import SeriesContext, TimeSeries, as_timeseries
 
 # ----------------------------------------------------------------------------- registry
 _REGISTRY: Dict[str, Type["Forecaster"]] = {}
@@ -116,6 +121,15 @@ def make_targets(load: np.ndarray, t_idx: np.ndarray, horizon: int) -> np.ndarra
     return load[np.clip(idx, 0, len(load) - 1)]
 
 
+def make_extra(ctx: Optional[SeriesContext], t_idx, context_len: int, horizon: int) -> Optional[Dict]:
+    """Thông tin phụ cho các cửa sổ kết thúc tại t_idx (xem docstring đầu file). ctx None -> None."""
+    if ctx is None:
+        return None
+    t_idx = np.asarray(t_idx, np.int64)
+    pos = t_idx[:, None] + np.arange(-context_len + 1, horizon + 1)[None, :]     # (N, L + H)
+    return dict(cal=ctx.calendar_features(pos), names=list(ctx.names), datasets=list(ctx.datasets))
+
+
 def as_series_list(data) -> List[TimeSeries]:
     """Mảng (T, n) | TimeSeries | list[TimeSeries] | None -> list[TimeSeries]."""
     if data is None:
@@ -151,26 +165,29 @@ def make_training_set(series: Sequence[TimeSeries], context_len: int, horizon: i
     Trả về dict:
         x    : (M, L)  lịch sử
         y    : (M, H)  giá trị thật t+1..t+H
+        cal  : (M, L + H, N_CALENDAR) feature lịch (quá khứ + tương lai)
         name : (M,)    tên chuỗi của từng mẫu (vd "sndzoo/WEB")
         dataset : (M,) tên dataset
     Chuỗi ngắn hơn L + H bị bỏ qua.
     """
-    xs, ys, names, dsets = [], [], [], []
+    xs, ys, cals, names, dsets = [], [], [], [], []
     for ts in series:
         t = np.arange(context_len - 1, len(ts) - horizon, max(1, int(stride)))
         if len(t) == 0:
             continue
         w = make_windows(ts.values, t, context_len)          # (N, L, n)
         y = make_targets(ts.values, t, horizon)              # (N, H, n)
+        cal = make_extra(ts.ctx, t, context_len, horizon)["cal"]
         for j in range(ts.values.shape[1]):
             xs.append(w[:, :, j])
             ys.append(y[:, :, j])
+            cals.append(cal)
             names += [ts.ctx.names[j]] * len(t)
             dsets += [ts.ctx.datasets[j]] * len(t)
     if not xs:
         raise ValueError(f"Không chuỗi nào dài hơn L + H = {context_len + horizon} bước")
     return dict(x=np.concatenate(xs).astype(np.float32), y=np.concatenate(ys).astype(np.float32),
-                name=np.array(names), dataset=np.array(dsets))
+                cal=np.concatenate(cals), name=np.array(names), dataset=np.array(dsets))
 
 
 # ----------------------------------------------------------------------------- lớp cơ sở
@@ -201,14 +218,14 @@ class Forecaster:
         """train/val: mảng (T, n), TimeSeries hoặc list[TimeSeries]. Mặc định không làm gì."""
         return self
 
-    def predict_batch(self, windows: np.ndarray) -> np.ndarray:
+    def predict_batch(self, windows: np.ndarray, extra: Optional[Dict] = None) -> np.ndarray:
         """windows: (N, L, n_vnf) lịch sử -> (N, H, n_vnf) dự báo cho các bước tiếp theo.
         Model dự báo khoảng: mặc định trả về P50 của predict_dist_batch."""
         if self.quantiles:
-            return self.predict_dist_batch(windows)[..., self.quantile_index(0.5)]
+            return self.predict_dist_batch(windows, extra)[..., self.quantile_index(0.5)]
         raise NotImplementedError
 
-    def predict_dist_batch(self, windows: np.ndarray) -> np.ndarray:
+    def predict_dist_batch(self, windows: np.ndarray, extra: Optional[Dict] = None) -> np.ndarray:
         """windows: (N, L, n_vnf) -> (N, H, n_vnf, Q) theo thứ tự self.quantiles (chỉ model dự báo khoảng)."""
         raise NotImplementedError(f"{self.name} không dự báo khoảng")
 
@@ -223,23 +240,26 @@ class Forecaster:
         """history: (L, n_vnf) -> (H, n_vnf)."""
         return self.predict_batch(np.asarray(history, np.float32)[None])[0]
 
-    def forecast_series(self, load: np.ndarray, t_idx, quantiles: Optional[Sequence[float]] = None) -> np.ndarray:
+    def forecast_series(self, load: np.ndarray, t_idx, quantiles: Optional[Sequence[float]] = None,
+                        ctx: Optional[SeriesContext] = None) -> np.ndarray:
         """Dự báo tại các thời điểm t_idx trên chuỗi load: (N, H, n_vnf).
         quantiles (vd (0.5, 0.9)): trả về (N, H, n_vnf, len(quantiles)); model dự báo một giá trị thì
-        mọi quantile = giá trị đó. Chỉ dùng dữ liệu <= t (oracle ghi đè hàm này để nhìn tương lai)."""
+        mọi quantile = giá trị đó. ctx: mô tả các cột của load (giờ, tên chuỗi) -> thông tin phụ cho model.
+        Chỉ dùng dữ liệu <= t (oracle ghi đè hàm này để nhìn tương lai)."""
         windows = make_windows(load, t_idx, self.context_len).astype(np.float32)
+        extra = make_extra(ctx, t_idx, self.context_len, self.horizon)
         if quantiles is None:
-            out = self.predict_batch(windows)
+            out = self.predict_batch(windows, extra)
         elif self.quantiles:
-            out = self.predict_dist_batch(windows)[..., [self.quantile_index(q) for q in quantiles]]
+            out = self.predict_dist_batch(windows, extra)[..., [self.quantile_index(q) for q in quantiles]]
         else:
-            out = np.repeat(np.asarray(self.predict_batch(windows))[..., None], len(quantiles), axis=-1)
+            out = np.repeat(np.asarray(self.predict_batch(windows, extra))[..., None], len(quantiles), axis=-1)
         return np.clip(np.asarray(out, np.float32), 0.0, None)
 
     def __call__(self, env, t: int, horizon: Optional[int] = None,
                  quantiles: Optional[Sequence[float]] = None) -> np.ndarray:
         """Giao diện forecaster của NFVScalingEnv: f(env, t) -> (H, n_vnf), hoặc (H, n_vnf, Q) khi có quantiles.
-        Dự báo theo khối _CHUNK bước rồi cache theo từng chuỗi env._load."""
+        Dự báo theo khối _CHUNK bước rồi cache theo từng chuỗi env._load. Giờ và tên VNF lấy từ env.traces."""
         H = horizon or env.cfg.forecast_horizon or self.horizon
         if H > self.horizon:
             raise ValueError(f"{self.name}: model dự báo {self.horizon} bước, env yêu cầu {H}")
@@ -254,7 +274,8 @@ class Forecaster:
         c = t // self._CHUNK
         if (c, q) not in chunks:
             lo = c * self._CHUNK
-            chunks[(c, q)] = self.forecast_series(load, np.arange(lo, min(lo + self._CHUNK, len(load))), q)
+            chunks[(c, q)] = self.forecast_series(load, np.arange(lo, min(lo + self._CHUNK, len(load))), q,
+                                                  env.traces.context())
         return chunks[(c, q)][t - c * self._CHUNK, :H]
 
     def demand_fn(self, lookahead: Optional[int] = None, quantile: Optional[float] = None) -> Callable:

@@ -46,6 +46,10 @@ def _find_split_dir(root: str, vnf: str, split: str) -> str:
     )
 
 
+# số feature lịch: sin/cos giờ trong ngày, sin/cos thứ trong tuần, cờ "có giờ thật"
+N_CALENDAR = 5
+
+
 @dataclass
 class SeriesContext:
     """Thông tin mô tả các cột của một mảng tải (T, n) — forecaster dùng làm "thông tin phụ".
@@ -66,6 +70,24 @@ class SeriesContext:
     @property
     def n(self) -> int:
         return len(self.names)
+
+    def calendar_features(self, pos) -> np.ndarray:
+        """Feature lịch tại các bước `pos` (mảng số nguyên bất kỳ shape; pos >= len chuỗi = tương lai, vẫn tính
+        được vì giờ của tương lai đã biết trước) -> shape pos.shape + (N_CALENDAR,).
+
+        Giờ mã hoá bằng sin/cos để 23:59 và 0:00 gần nhau. Ví dụ 6:00 -> góc 90° -> (sin, cos) = (1, 0);
+        18:00 -> (-1, 0). Không có giờ thật (calendar=False) -> toàn 0, kể cả cờ."""
+        pos = np.asarray(pos, np.int64)
+        out = np.zeros(pos.shape + (N_CALENDAR,), np.float32)
+        if not self.calendar or self.start is None:
+            return out
+        minutes = self.start.hour * 60 + self.start.minute + pos * self.step_minutes   # phút kể từ 0h ngày đầu
+        day = 2 * np.pi * (minutes % 1440) / 1440.0
+        week = 2 * np.pi * ((self.start.dayofweek + minutes // 1440) % 7) / 7.0
+        out[..., 0], out[..., 1] = np.sin(day), np.cos(day)
+        out[..., 2], out[..., 3] = np.sin(week), np.cos(week)
+        out[..., 4] = 1.0
+        return out
 
     def shifted(self, steps: int) -> "SeriesContext":
         """Context của phần chuỗi bắt đầu từ bước `steps` (dùng khi cắt train/val)."""

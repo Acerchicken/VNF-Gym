@@ -243,6 +243,9 @@ FORECASTERS = {
     "linear": dict(ridge=1e-2),              # hồi quy tuyến tính (AR) có ridge, dự báo trực tiếp H bước
     "lstm": dict(
         quantiles=FORECAST["quantiles"],   # () = dự báo một giá trị (loss MSE)
+        use_context=True,    # thông tin phụ: giờ/thứ + embedding chuỗi và dataset
+        emb_dim=8,           # độ dài vector embedding
+        id_dropout=0.1,      # tỉ lệ mẫu train bị xoá ID (để dự báo được chuỗi chưa gặp)
         hidden_size=64,
         num_layers=2,
         dropout=0.1,
@@ -255,10 +258,14 @@ FORECASTERS = {
     ),
     # --- các biến thể để so sánh từng bước (ablation) ---
     # Bước 0: LSTM cũ, một giá trị, chỉ train trên SNDZoo
-    "lstm_snd": dict(model="lstm", quantiles=(), train_datasets=("sndzoo",), hidden_size=64, num_layers=2,
+    "lstm_snd": dict(model="lstm", quantiles=(), use_context=False, train_datasets=("sndzoo",), hidden_size=64, num_layers=2,
                      dropout=0.1, epochs=30, batch_size=256, lr=1e-3, patience=5, seed=0),
     # Bước 1: một giá trị, train trên mọi dataset
-    "lstm_point": dict(model="lstm", quantiles=(), hidden_size=64, num_layers=2, dropout=0.1,
-                       epochs=30, batch_size=256, lr=1e-3, patience=5, seed=0),
+    "lstm_point": dict(model="lstm", quantiles=(), use_context=False, hidden_size=64, num_layers=2,
+                       dropout=0.1, epochs=30, batch_size=256, lr=1e-3, patience=5, seed=0),
+    # Bước 2: dự báo khoảng, chưa có thông tin phụ
+    "lstm_q": dict(model="lstm", use_context=False, hidden_size=64, num_layers=2, dropout=0.1,
+                   epochs=30, batch_size=256, lr=1e-3, patience=5, seed=0),
+    # (Bước 3 = "lstm" ở trên: dự báo khoảng + thông tin phụ)
     "oracle": dict(),                        # tương lai thật — chỉ là cận trên, không báo cáo như kết quả thật
 }

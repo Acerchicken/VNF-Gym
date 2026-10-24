@@ -16,9 +16,9 @@ def _predict(fc: Forecaster, ts: TimeSeries, H: int):
     t = np.arange(fc.context_len - 1, len(ts) - H)
     true = make_targets(ts.values, t, H)
     if fc.quantiles:
-        dist = fc.forecast_series(ts.values, t, quantiles=fc.quantiles)[:, :H]
+        dist = fc.forecast_series(ts.values, t, quantiles=fc.quantiles, ctx=ts.ctx)[:, :H]
         return dist[..., fc.quantile_index(0.5)], true, dist
-    return fc.forecast_series(ts.values, t)[:, :H], true, None
+    return fc.forecast_series(ts.values, t, ctx=ts.ctx)[:, :H], true, None
 
 
 def _quantile_metrics(dist: np.ndarray, true: np.ndarray, quantiles) -> dict:

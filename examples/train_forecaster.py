@@ -35,9 +35,10 @@ ALGOS = {  # one-line description of each algorithm for --help
     "naive": "repeat the last observed value (simplest baseline)",
     "moving_avg": "mean of the most recent steps",
     "linear": "linear autoregression (AR) with ridge regularization",
-    "lstm": "LSTM with P10/P50/P90 range forecast (requires PyTorch)",
+    "lstm": "LSTM, P10/P50/P90 + calendar + series/dataset ID (Step 3, requires PyTorch)",
     "lstm_snd": "LSTM, single value, trained on SNDZoo only (Step 0 reference)",
     "lstm_point": "LSTM, single value, trained on every dataset (Step 1)",
+    "lstm_q": "LSTM, P10/P50/P90, no calendar/series ID (Step 2)",
     "oracle": "sees the future = upper bound, for reference only, not a real result",
 }
 EPILOG = "Available algorithms:\n" + "\n".join(
@@ -125,7 +126,7 @@ df_ds.index.names = ["model", "dataset"]
 print("\nMAE on the test part of each dataset:")
 print(df_ds["mae"].unstack("dataset").round(4).to_string())
 df_ds.to_csv(os.path.join(args.out, "forecast_metrics_by_dataset.csv"))
-te = te.values                            # plots below use the plain array
+te_ctx, te = te.ctx, te.values           # plots below use the plain array + its context
 
 try:
     import matplotlib.dates as mdates
@@ -139,7 +140,7 @@ try:
     preds = {}                              # forecast once, reuse for every plot
     for name in args.plot:
         try:
-            preds[name] = load_forecaster(name, args.out).forecast_series(te, t)[:, k - 1]
+            preds[name] = load_forecaster(name, args.out).forecast_series(te, t, ctx=te_ctx)[:, k - 1]
         except FileNotFoundError as e:
             print(f"  skipping {name} in plots: {e}")
     lo, hi = (int(round(len(t) * r / 100)) for r in args.range)   # plot only the --range part so the time axis spreads out
